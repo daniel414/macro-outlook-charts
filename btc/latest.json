@@ -1,8 +1,8 @@
 {
- "date": "2026-10-15 22:09",
- "summary_text": "BTC 持倉數據\n2026.10.15 22:09 (UTC+8)｜BTC 80,872\n\n──────────\n【散戶 vs 大戶】\n散戶：偏多，而且還在加多\n・OKX 全體 +28.2%｜Gate +26.5%\n\n大戶：偏空，Gate 最明顯\n・大戶持倉：OKX -3.3%｜Gate -7.5%\n・大戶帳戶：OKX +10.4%｜Gate -28.3%\n・巨鯨散戶差 -0.85（數字越負，大戶比散戶越偏空）\n\n解讀：散戶追多、大戶站空方，兩邊分歧大，反彈容易遇到賣壓；大戶如果開始減空，才是轉強訊號。\n\n──────────\n【未平倉量】\n・OKX $2.46B｜Gate $4.11B｜HL $3.21B\n\n──────────\n【資金費率】\n・每 8h：OKX +0.0053%｜Gate +0.0053%\n・每 1h：HL +0.0012%\n\n──────────\n【Bitfinex 槓桿】\n・+99.44%｜多 89,627／空 251 BTC\n\n──────────\n【Ahr999】\n・0.51｜定投區（0.45–1.2）\n\n──────────\n【Binance（延遲，截至 10/15 07:55）】\n・全部 +27.8%｜大戶持倉 +21.2%\n・巨鯨vs散戶 -0.23",
+ "date": "2026-10-15 23:08",
+ "summary_text": "BTC 持倉數據\n2026.10.15 23:08 (UTC+8)｜BTC 82,047\n\n──────────\n【散戶 vs 大戶】\n散戶：偏多，OKX 小幅減多\n・OKX 全體 +26.2%｜Gate +26.5%\n\n大戶：偏空，OKX 小幅減空，Gate 仍最明顯\n・大戶持倉：OKX -2.6%｜Gate -7.5%\n・大戶帳戶：OKX +7.5%｜Gate -28.3%\n・巨鯨散戶差 -0.76（數字越負，大戶比散戶越偏空）\n\n解讀：價格急拉，散戶沒有追多、大戶小幅減空，兩邊分歧縮小；大戶持倉如果轉成淨多，才是更明確的轉強訊號。\n\n──────────\n【未平倉量】\n・OKX $2.48B｜Gate $4.11B｜HL $3.23B\n\n──────────\n【資金費率】\n・每 8h：OKX +0.0053%｜Gate +0.0053%\n・每 1h：HL +0.0009%\n\n──────────\n【Bitfinex 槓桿】\n・+99.45%｜多 89,626／空 247 BTC\n\n──────────\n【Ahr999】\n・0.52｜定投區（0.45–1.2）\n\n──────────\n【Binance（延遲，截至 10/15 07:55）】\n・全部 +27.8%｜大戶持倉 +21.2%\n・巨鯨vs散戶 -0.23",
  "change_text": "",
- "lead_text": "【摘要】\nBTC 80,872，反彈站回 80,800\n\n散戶：偏多，還在加多\n大戶：偏空，Gate 最明顯\n分歧：巨鯨散戶差 -0.85，兩邊分歧大\n\n解讀：大戶沒有減空，反彈上方容易遇到賣壓；大戶開始減空才是轉強訊號。\n\n支撐 80,470、80,170｜壓力 81,150、81,420",
- "image_url": "https://raw.githubusercontent.com/daniel414/macro-outlook-charts/b8365e0140c44c2c34782fccbe3b629f8f8b9965/btc/btc_positioning_20261015_2209.jpg",
- "preview_url": "https://raw.githubusercontent.com/daniel414/macro-outlook-charts/670de4d233a9f1ae8a519580fc33d9cd556ffbf7/btc/btc_positioning_20261015_2209_preview.jpg"
+ "lead_text": "【摘要】\nBTC 82,047，急拉突破 81,420 壓力\n\n散戶：偏多，OKX 小幅減多\n大戶：偏空，OKX 小幅減空，Gate 不變\n分歧：巨鯨散戶差 -0.76，分歧收斂但仍大\n\n解讀：價格急拉時散戶沒追多、大戶小幅減空，這波上漲比較健康；站穩 81,750 可看 82,300，跌回 81,420 下方要防假突破。\n\n支撐 81,750、81,420｜壓力 82,300、83,100",
+ "image_url": "https://raw.githubusercontent.com/daniel414/macro-outlook-charts/35dedf6cedce325793dc9d8a1e1cd9e8ea397aab/btc/btc_positioning_20261015_2308.jpg",
+ "preview_url": "https://raw.githubusercontent.com/daniel414/macro-outlook-charts/47b97f8222f48c23b07f522296f4e5d192e275e0/btc/btc_positioning_20261015_2308_preview.jpg"
 }
