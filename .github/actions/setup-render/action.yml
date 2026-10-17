@@ -1,0 +1,28 @@
+name: setup-render
+description: Python 3.13 + pinned deps + the box's exact Noto Sans CJK font (Debian trixie 20240730) so charts match the bot's
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.13.5"
+        cache: pip
+        cache-dependency-path: scripts/requirements.txt
+    - shell: bash
+      run: python -m pip install --disable-pip-version-check -q -r scripts/requirements.txt
+    - id: fontcache
+      uses: actions/cache@v4
+      with:
+        path: ~/.local/share/fonts/noto-cjk
+        key: noto-cjk-20240730-repack1-1
+    - if: steps.fontcache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        curl -fsSL -o /tmp/noto.deb https://deb.debian.org/debian/pool/main/f/fonts-noto-cjk/fonts-noto-cjk_20240730+repack1-1_all.deb
+        echo "f5dc28a754e17327d99f0a612134d92c8dd6187314ae967cb77f25df60860139  /tmp/noto.deb" | sha256sum -c -
+        dpkg-deb -x /tmp/noto.deb /tmp/noto
+        mkdir -p ~/.local/share/fonts/noto-cjk
+        cp /tmp/noto/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc /tmp/noto/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc ~/.local/share/fonts/noto-cjk/
+    - shell: bash
+      run: fc-cache -f >/dev/null && fc-match "Noto Sans CJK TC" file

@@ -1,0 +1,17 @@
+# Pinned to the versions on the Grok Bot box (/workspace/btc-sentiment/.venv, Python 3.13.5) so charts render the same
+numpy==2.5.4
+pandas==3.0.6
+matplotlib==3.11.2
+pillow==12.3.0
+requests==2.34.2
+contourpy==1.4.0
+cycler==0.12.1
+fonttools==4.65.0
+kiwisolver==1.5.1
+pyparsing==3.3.3
+python-dateutil==2.9.0.post0
+packaging==26.3
+urllib3==2.8.0
+certifi==2026.7.22
+idna==3.20
+six==1.17.0
