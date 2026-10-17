@@ -1,8 +1,8 @@
 {
- "date": "2026-10-16 06:13",
- "summary_text": "BTC 持倉數據\n2026.10.16 06:13 (UTC+8)｜BTC 82,455\n\n──────────\n【散戶 vs 大戶】\n散戶：偏多，OKX 多空差值小降、Gate 持平\n・OKX 全體 +20.5%｜Gate +18.6%\n\n大戶：Gate 大戶持倉維持淨多，OKX 仍小幅偏空\n・大戶持倉：OKX -1.6%｜Gate +8.3%\n・大戶帳戶：OKX +5.1%｜Gate -28.3%\n・巨鯨散戶差 -0.55（數字越負，大戶比散戶越偏空）\n\n解讀：散戶與大戶部位都沒有明顯移動，結構和上小時相同；OKX 大戶持倉若轉正，才是更全面的轉強訊號。\n\n──────────\n【未平倉量】\n・OKX $2.42B｜Gate $4.19B｜HL $3.42B\n\n──────────\n【資金費率】\n・每 8h：OKX +0.0026%｜Gate +0.0100%\n・每 1h：HL +0.0013%\n\n──────────\n【Bitfinex 槓桿】\n・+99.43%｜多 89,624／空 258 BTC\n\n──────────\n【Ahr999】\n・0.53｜定投區（0.45–1.2）\n\n──────────\n【Binance（延遲，截至 10/15 07:55）】\n・全部 +27.8%｜大戶持倉 +21.2%\n・巨鯨vs散戶 -0.23",
+ "date": "2026-10-17 13:12",
+ "summary_text": "BTC 持倉數據\n2026.10.17 13:12 (UTC+8)｜BTC 81,646\n\n──────────\n【散戶 vs 大戶】\n散戶：偏多，OKX 與 Gate 多空差值都在 +25% 上下\n・OKX 全體 +26.8%｜Gate +24.6%\n\n大戶：大戶持倉兩邊都小幅偏空，Gate 已轉為淨空\n・大戶持倉：OKX -2.9%｜Gate -2.6%\n・大戶帳戶：OKX +11.9%｜Gate -20.3%\n・巨鯨散戶差 -0.79（數字越負，大戶比散戶越偏空）\n\n解讀：散戶加多、大戶持倉偏空，分歧明顯擴大；OKX 或 Gate 大戶持倉轉正之前，反彈較難延續。\n\n──────────\n【未平倉量】\n・OKX $2.49B｜Gate $4.22B｜HL $3.35B\n\n──────────\n【資金費率】\n・每 8h：OKX +0.0026%｜Gate +0.0077%\n・每 1h：HL +0.0013%\n\n──────────\n【Bitfinex 槓桿】\n・+99.40%｜多 89,620／空 271 BTC\n\n──────────\n【Ahr999】\n・0.51｜定投區（0.45–1.2）\n\n──────────\n【Binance（延遲，截至 10/16 07:55）】\n・全部 +20.1%｜大戶持倉 +12.6%\n・巨鯨vs散戶 -0.21",
  "change_text": "",
- "lead_text": "【摘要】\nBTC 82,455，較上小時 82,162 小漲 +0.36%，往 82,600 壓力靠近\n\n散戶：偏多略減，OKX +20.5%｜Gate +18.6%\n大戶：Gate 大戶持倉淨多維持 +8.3%，OKX 仍小幅偏空 -1.6%\n分歧：巨鯨散戶差 -0.55，分歧持穩微收\n\n解讀：價格小彈但部位幾乎沒動，結構同上小時；OKX 未平倉 $2.43B→$2.42B、HL $3.41B→$3.42B，變動很小。站穩可再試 82,600，跌破 81,900 要防回吐急拉漲幅。\n\n支撐 81,900、81,700｜壓力 82,600、83,100",
- "image_url": "https://raw.githubusercontent.com/daniel414/macro-outlook-charts/d9a6a789ee49813e33f4940e74b592c5d45625a4/btc/btc_positioning_20261016_0613.jpg",
- "preview_url": "https://raw.githubusercontent.com/daniel414/macro-outlook-charts/6fdd5a91e0ab6b2be0e73640828ec575583c709e/btc/btc_positioning_20261016_0613_preview.jpg"
+ "lead_text": "【摘要】\nBTC 81,646，24 小時 -0.6%，夜間曾跌到 80,771，之後在 81,400–81,800 窄幅整理\n\n散戶：偏多加重，OKX +26.8%｜Gate +24.6%\n大戶：偏空，OKX 大戶持倉 -2.9%，Gate 大戶持倉由淨多轉為 -2.6%\n分歧：巨鯨散戶差 -0.79，分歧擴大\n\n解讀：價格走弱散戶反而加多，大戶持倉兩邊都站空方，結構對多頭不利；跌破 81,350 容易再測 80,800，重新站上 81,800 才緩解。\n\n支撐 81,350、80,800｜壓力 81,800、82,600",
+ "image_url": "https://raw.githubusercontent.com/daniel414/macro-outlook-charts/e982cf5d6b6f575f04d694e1850f309b01cba64c/btc/btc_positioning_20261017_1312.jpg",
+ "preview_url": "https://raw.githubusercontent.com/daniel414/macro-outlook-charts/688871774eb6a08d4c3ed1544ea0c896e0481040/btc/btc_positioning_20261017_1312_preview.jpg"
 }
