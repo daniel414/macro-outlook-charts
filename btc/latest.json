@@ -1,8 +1,8 @@
 {
- "date": "2026-10-17 23:09",
- "summary_text": "BTC 持倉數據\n2026.10.17 23:10 (UTC+8)｜BTC 81,554\n\n──────────\n【散戶 vs 大戶】\n散戶：偏多，OKX 與 Gate 多空差值都在 +25% 上下\n・OKX 全體 +27.0%｜Gate +24.6%\n\n大戶：大戶持倉兩邊都偏空，Gate 空單較重，還沒有轉正跡象\n・大戶持倉：OKX -2.8%｜Gate -3.3%\n・大戶帳戶：OKX +11.5%｜Gate -22.0%\n・巨鯨散戶差 -0.80（數字越負，大戶比散戶越偏空）\n\n解讀：散戶偏多、大戶持倉偏空的分歧仍在，價格在支撐上方整理；大戶持倉轉正之前，反彈較難延續。\n\n──────────\n【未平倉量】\n・OKX $2.48B｜Gate $4.18B｜HL $3.35B\n\n──────────\n【資金費率】\n・每 8h：OKX +0.0052%｜Gate +0.0061%\n・每 1h：HL +0.0009%\n\n──────────\n【Bitfinex 槓桿】\n・+99.29%｜多 89,616／空 321 BTC\n\n──────────\n【Ahr999】\n・0.51｜定投區（0.45–1.2）\n\n──────────\n【Binance（延遲，截至 10/17 07:55）】\n・全部 +26.6%｜大戶持倉 +27.9%\n・巨鯨vs散戶 +0.05",
+ "date": "2026-10-18 00:12",
+ "summary_text": "BTC 持倉數據\n2026.10.18 00:11 (UTC+8)｜BTC 81,399\n\n──────────\n【散戶 vs 大戶】\n散戶：偏多，OKX 與 Gate 多空差值都在 +25% 上下\n・OKX 全體 +26.7%｜Gate +24.4%\n\n大戶：大戶持倉兩邊都偏空，Gate 空單較重，還沒有轉正跡象\n・大戶持倉：OKX -2.7%｜Gate -3.7%\n・大戶帳戶：OKX +11.5%｜Gate -22.7%\n・巨鯨散戶差 -0.78（數字越負，大戶比散戶越偏空）\n\n解讀：散戶偏多、大戶持倉偏空的分歧仍在，價格壓在支撐附近；大戶持倉轉正之前，反彈較難延續。\n\n──────────\n【未平倉量】\n・OKX $2.48B｜Gate $4.14B｜HL $3.34B\n\n──────────\n【資金費率】\n・每 8h：OKX +0.0095%｜Gate +0.0056%\n・每 1h：HL +0.0010%\n\n──────────\n【Bitfinex 槓桿】\n・+99.28%｜多 89,616／空 323 BTC\n\n──────────\n【Ahr999】\n・0.51｜定投區（0.45–1.2）\n\n──────────\n【Binance（延遲，截至 10/17 07:55）】\n・全部 +26.6%｜大戶持倉 +27.9%\n・巨鯨vs散戶 +0.05",
  "change_text": "",
- "lead_text": "【摘要】\nBTC 81,554，24 小時約 -0.2%，22:00 在 81,461 止跌後小幅回到 81,550 附近，仍在 81,350–81,800 區間下半部\n\n散戶：偏多不退，OKX +27.0%｜Gate +24.6%\n大戶：偏空，Gate 大戶持倉 -3.3% 空單最明顯，OKX 大戶持倉 -2.8% 維持空方\n分歧：巨鯨散戶差 -0.80，分歧維持偏大\n\n解讀：價格守在 81,350 支撐上方小幅整理，散戶多單沒退、大戶空單也沒減，短線仍偏弱；站回 81,800 才算轉強，跌破 81,350 容易往 80,800 回測。\n\n支撐 81,350、80,800｜壓力 81,800、82,600",
- "image_url": "https://raw.githubusercontent.com/daniel414/macro-outlook-charts/3da5b6ef1deedced302f5da6bc3fa61a05325aed/btc/btc_positioning_20261017_2309.jpg",
- "preview_url": "https://raw.githubusercontent.com/daniel414/macro-outlook-charts/bc8e55b88c236284c6f2d7effe401d3b02e79440/btc/btc_positioning_20261017_2309_preview.jpg"
+ "lead_text": "【摘要】\nBTC 81,399，24 小時約 -0.2%，23:00 一度跌到 81,296 短暫跌破 81,350，目前回到 81,400 附近\n\n散戶：偏多不退，OKX +26.7%｜Gate +24.4%\n大戶：偏空，Gate 大戶持倉 -3.7% 空單最明顯，OKX 大戶持倉 -2.7% 維持空方\n分歧：巨鯨散戶差 -0.78，分歧維持偏大\n\n解讀：價格貼著 81,300–81,350 支撐，散戶多單沒退、Gate 大戶空單略增，短線仍偏弱；收不回 81,600 以上的話，再跌破 81,300 容易往 80,800 回測。\n\n支撐 81,300、80,800｜壓力 81,800、82,600",
+ "image_url": "https://raw.githubusercontent.com/daniel414/macro-outlook-charts/fe27e2caea3b8c151951ef70b13efad58a6eb852/btc/btc_positioning_20261018_0012.jpg",
+ "preview_url": "https://raw.githubusercontent.com/daniel414/macro-outlook-charts/331541d432d4a9378b285a3073576b277bbd7430/btc/btc_positioning_20261018_0012_preview.jpg"
 }
