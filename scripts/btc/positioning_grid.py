@@ -8,6 +8,10 @@ Panels (BTC price on each; L/S ratios shown as long−short deltas in %, Daniel 
 3 OKX 大戶多空比 (account/position) · 4 Gate 大戶多空比 (Binance substitute; Binance 451) · 5 巨鯨 vs 散戶差值 ·
 6 Bitfinex 槓桿多空 · 7 Ahr999 (daily, computed from FRED CBBTCUSD + Kraken) · 8 資金費率.
 Data: data/positioning2.db (posdata.py, run every 15 min by run_collect.sh); OKX funding from sentiment.db.
+Freshness (2026-10-17, after the dead collector left OKX funding 46h stale): every run refreshes OKX realized funding live
+(btcsent.positioning.update, 1 page, OKX public funding-rate-history); OI/funding series older than their bar + 2h (HL snapshot 2h,
+OKX 8h funding 9h) trigger a live posdata refetch, and anything still stale is output as None, listed in POSGRID_JSON
+"stale" (old value + as-of) and in "fails", so it is never shown as current. "asof" gives each funding/OI timestamp.
 Descriptive only, no zones, no circles.
 """
 import argparse, io, json, os, sqlite3, sys, time
@@ -45,6 +49,57 @@ def series(con, src, metric, tf, start=None, end=None):
         q += " AND ts<?"; p.append(int(end))
     df = pd.read_sql_query(q + " ORDER BY ts", con, params=p)
     return df.set_index("ts")["value"]
+
+
+STALE, ASOF = {}, {}
+FUND_OKX_MAX = 9 * 3600     # OKX settles every 8h; the last realized rate may legitimately be up to 8h old
+SNAP_MAX = 2 * 3600
+
+
+def tf_max(tf):
+    return STEP.get(tf, 3600) + 2 * 3600   # ts = bar start, so a current bar can be up to one bar old
+
+
+def _maxts(con, src, metric, tf):
+    return con.execute("SELECT MAX(ts) FROM series WHERE src=? AND metric=? AND tf=?", (src, metric, tf)).fetchone()[0] or 0
+
+
+def freshen(tf, fails):
+    """Refresh OKX funding live every run; refetch any OI/funding source whose newest row is stale (free public APIs)."""
+    try:
+        from btcsent.positioning import update as okx_update
+        okx_update(connect(), max_pages=1)
+    except Exception as e:
+        fails.append(f"okx_funding_refresh: {e!r}")
+    now = time.time(); con = sqlite3.connect(PDB, timeout=60)
+    checks = {"okx": [("oi_usd", tf)], "gate": [("oi_usd", tf), ("funding", tf)], "hyperliquid": [("oi_usd", "snap"), ("funding_1h", "snap")]}
+    need = [src for src, ms in checks.items()
+            if any(now - _maxts(con, src, m, t) > (SNAP_MAX if t == "snap" else tf_max(t)) for m, t in ms)]
+    con.close()
+    if need:
+        try:
+            import posdata as PD
+            pc = PD.db()
+            for src in need:
+                try:
+                    {"okx": lambda: PD.okx(pc, False), "gate": lambda: PD.gate(pc, False), "hyperliquid": lambda: PD.hyperliquid(pc)}[src]()
+                except Exception as e:
+                    fails.append(f"{src}_refetch: {e!r}")
+            pc.close()
+        except Exception as e:
+            fails.append(f"posdata_refetch: {e!r}")
+
+
+def fresh(key, s, max_age):
+    """Last value of s, or None (recorded in STALE) when its timestamp is older than max_age seconds."""
+    if s is None or s.empty:
+        return None
+    ts, v = int(s.index[-1]), float(s.iloc[-1])
+    asof = datetime.fromtimestamp(ts, TZ).strftime("%m/%d %H:%M"); ASOF[key] = asof
+    if time.time() - ts > max_age:
+        STALE[key] = {"value": round(v, 8), "asof": asof + " UTC+8"}
+        return None
+    return v
 
 
 def longpct(r):
@@ -180,6 +235,7 @@ def main():
     S = lambda src, m, tf=a.tf: series(con, src, m, tf, start_b, end_b)
     kl, exch = get_klines(a.tf.lower(), int(start_b), int(end_b)); kl = kl[(kl.index >= start_b) & (kl.index < end_b)]
     fails, cur = [], {}
+    freshen(a.tf, fails)
     global BN_LAST
     bn = binance_tf(con, step, start_b, end_b)
     if not bn.empty:
@@ -219,7 +275,8 @@ def main():
     bo = BS("oi_usd"); stepline(ax, bo / 1e9, w, BN_COL, lw=1.4); bn_mark(ax, bo / 1e9, w)
     ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _=None: f"${v:.1f}B"))
     hl = series(con, "hyperliquid", "oi_usd", "snap"); vh = last(hl)[0]
-    vo, vg = last(o)[0], last(g)[0]; cur.update({"未平倉_okx_usd": vo, "未平倉_gate_usd": vg, "未平倉_hyperliquid_usd": vh})
+    vh = fresh("未平倉_hyperliquid_usd", hl, SNAP_MAX)
+    vo, vg = fresh("未平倉_okx_usd", o, tf_max(a.tf)), fresh("未平倉_gate_usd", g, tf_max(a.tf)); cur.update({"未平倉_okx_usd": vo, "未平倉_gate_usd": vg, "未平倉_hyperliquid_usd": vh})
     chg = (o.iloc[-1] / o.iloc[-7] - 1) * 100 if len(o) > 7 else float("nan")
     head(ax, "未平倉量", (f"OKX ${vo/1e9:.2f}B ({chg:+.1f}%/6根) · Gate ${vg/1e9:.2f}B" if vo and vg else "資料不足") + (f" · Hyperliquid ${vh/1e9:.2f}B" if vh else ""),
          "看法：未平倉合約總值。價漲＋OI 增＝新資金追多；價跌＋OI 增＝加空；OI 急降＝平倉或爆倉", "來源：OKX open-interest-history、Gate.io contract_stats、data.binance.vision sum_open_interest_value、Hyperliquid（僅即時快照）")
@@ -334,8 +391,8 @@ def main():
         ax.bar(num(fo.index), fo.values, width=8 / 24 * 0.8, align="edge", color=np.where(fo.values >= 0, TH["up"], TH["down"]), alpha=0.85, lw=0)
     stepline(ax, fg, w, TH["b"], lw=1.3)
     ax.axhline(0, color=TH["muted"], lw=0.7); ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _=None: f"{v:.3f}%"))
-    hf = last(series(con, "hyperliquid", "funding_1h", "snap"))[0]
-    vo, vg = last(fo)[0], last(fg)[0]; cur.update({"資金費率_okx_8h_pct": vo, "資金費率_gate_pct": vg, "資金費率_hyperliquid_1h_pct": hf * 100 if hf is not None else None})
+    hf = fresh("資金費率_hyperliquid_1h_pct", series(con, "hyperliquid", "funding_1h", "snap"), SNAP_MAX)
+    vo, vg = fresh("資金費率_okx_8h_pct", fo, FUND_OKX_MAX), fresh("資金費率_gate_pct", fg, tf_max(a.tf)); cur.update({"資金費率_okx_8h_pct": vo, "資金費率_gate_pct": vg, "資金費率_hyperliquid_1h_pct": hf * 100 if hf is not None else None})
     head(ax, "資金費率", (f"OKX {vo:+.4f}%/8h" if vo is not None else "OKX —") + (f" · Gate {vg:+.4f}%" if vg is not None else "") + (f" · HL {hf*100:+.4f}%/1h" if hf is not None else ""),
          "看法：正（綠）＝多方付錢給空方，多單擁擠；負（紅）＝空方付錢，空單擁擠", "來源：OKX 已結算資金費率（柱）、Gate.io last_funding_rate（青線）、Hyperliquid 即時")
     legend(ax, [("OKX", TH["up"]), ("Gate", TH["b"])]); add_price(ax, kl, w)
@@ -363,6 +420,9 @@ def main():
                     "binance_多空差值_大戶帳戶": lsdelta(float(lb.top_account)), "binance_巨鯨散戶差": float(lb.top_position - lb.global_account),
                     "binance_未平倉_usd": float(lb.oi_usd), "binance_主動買賣比": float(lb.taker_ratio),
                     "binance_asof": datetime.fromtimestamp(BN_LAST, TZ).strftime("%Y-%m-%d %H:%M UTC+8")})
+    for k, v in STALE.items():
+        fails.append(f"stale: {k} as of {v['asof']} (not shown as current)")
+    cur["asof"], cur["stale"] = ASOF, STALE
     cur["btc"] = round(float(kl.c.iloc[-1]), 1); cur["fails"] = fails
     print("POSGRID_JSON " + json.dumps({k: (round(v, 6) if isinstance(v, float) else v) for k, v in cur.items()}, ensure_ascii=False))
 
