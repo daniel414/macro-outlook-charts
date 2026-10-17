@@ -1,0 +1,450 @@
+{
+  "reddit": {
+    "subreddits": {
+      "Bitcoin": {
+        "comments": true,
+        "keyword_filter": false
+      },
+      "BitcoinMarkets": {
+        "comments": true,
+        "keyword_filter": false
+      },
+      "btc": {
+        "comments": true,
+        "keyword_filter": false
+      },
+      "BitcoinBeginners": {
+        "comments": false,
+        "keyword_filter": false
+      },
+      "CryptoCurrency": {
+        "comments": false,
+        "keyword_filter": true
+      },
+      "CryptoMarkets": {
+        "comments": false,
+        "keyword_filter": true
+      }
+    },
+    "skip_authors": [
+      "AutoModerator",
+      "[deleted]",
+      "BitcoinMarkets_Bot",
+      "coinfeeds-bot"
+    ]
+  },
+  "fourchan": {
+    "board": "biz",
+    "thread_regex": "(?i)\\b(btc|bitcoin|bitcoins|sats?|satoshi|crypto|/cmg/|/bcg/|/biz/ ?general|smg|bitcorn|stackers?)\\b",
+    "btc_thread_regex": "(?i)\\b(btc|bitcoin|bitcoins|sats|satoshi|bitcorn)\\b"
+  },
+  "bitcointalk": {
+    "boards": {
+      "1": "Bitcoin Discussion",
+      "57": "Speculation"
+    },
+    "max_board_pages": 6,
+    "max_topic_pages": 250,
+    "skip_authors": [
+      "ChartBuddy"
+    ],
+    "delay_sec": 1.1,
+    "timeout_sec": 12,
+    "attempts": 1,
+    "time_budget_sec": 150,
+    "max_requests_per_cycle": 60,
+    "max_consecutive_failures": 2,
+    "_cost_doc": "archive-only source (dropped from production): per cycle at most time_budget_sec / max_requests_per_cycle; aborts after max_consecutive_failures failed pages; interrupted boards/topics resume next cycle."
+  },
+  "telegram": {
+    "channels": {
+      "bitcoin": {
+        "keyword_filter": false
+      },
+      "WatcherGuru": {
+        "keyword_filter": true
+      },
+      "cointelegraph": {
+        "keyword_filter": true
+      },
+      "unfolded": {
+        "keyword_filter": true
+      },
+      "wublockchainenglish": {
+        "keyword_filter": true
+      },
+      "crypto": {
+        "keyword_filter": true
+      },
+      "DeFiMillion": {
+        "keyword_filter": true
+      }
+    },
+    "max_pages_per_channel": 120
+  },
+  "farcaster": {
+    "queries": [
+      "bitcoin",
+      "btc",
+      "$btc",
+      "sats",
+      "bitcoin price",
+      "btc price"
+    ],
+    "max_pages_per_query": 40
+  },
+  "zones": {
+    "_doc": "Per-interval Greed/Fear rules from calibrate.py (walk-forward, entry-based contrarian objective). pct: greed=P<greed_pct>, fear=P<fear_pct> of the last <window_buckets> closed ratio bars; z: exp(mean \u00b1 k\u00b7sd) of log ratio over the same window.",
+    "_calibrated": "2026-10-17 13:18 (UTC+8)",
+    "1m": {
+      "method": "z",
+      "window_buckets": 30,
+      "k": 1.25,
+      "validated": false
+    },
+    "3m": {
+      "method": "z",
+      "window_buckets": 30,
+      "k": 1.25,
+      "validated": false
+    },
+    "5m": {
+      "method": "z",
+      "window_buckets": 30,
+      "k": 1.25,
+      "validated": false
+    },
+    "15m": {
+      "method": "z",
+      "window_buckets": 120,
+      "horizon_buckets": 1,
+      "model": "distilbart-mnli-12-3-zs",
+      "k": 1.5,
+      "oos_spread_pct": -0.028,
+      "oos_t": -0.18
+    },
+    "30m": {
+      "method": "z",
+      "window_buckets": 120,
+      "horizon_buckets": 2,
+      "model": "distilbart-mnli-12-3-zs",
+      "k": 1.5,
+      "oos_spread_pct": -0.308,
+      "oos_t": -1.37
+    },
+    "1h": {
+      "method": "pct",
+      "window_buckets": 30,
+      "horizon_buckets": 3,
+      "model": "distilbart-mnli-12-3-zs",
+      "greed_pct": 95.0,
+      "fear_pct": 5.0,
+      "oos_spread_pct": -0.055,
+      "oos_t": -0.21
+    },
+    "2h": {
+      "method": "pct",
+      "window_buckets": 60,
+      "horizon_buckets": 6,
+      "model": "distilbart-mnli-12-3-zs",
+      "greed_pct": 95.0,
+      "fear_pct": 5.0,
+      "oos_spread_pct": 0.181,
+      "oos_t": 0.32
+    },
+    "4h": {
+      "method": "pct",
+      "window_buckets": 120,
+      "horizon_buckets": 12,
+      "model": "distilbart-mnli-12-3-zs",
+      "greed_pct": 90.0,
+      "fear_pct": 10.0,
+      "oos_spread_pct": -0.281,
+      "oos_t": -0.39
+    },
+    "6h": {
+      "method": "pct",
+      "window_buckets": 60,
+      "horizon_buckets": 8,
+      "model": "distilbart-mnli-12-3-zs",
+      "greed_pct": 95.0,
+      "fear_pct": 5.0,
+      "oos_spread_pct": -0.595,
+      "oos_t": -0.72
+    },
+    "8h": {
+      "method": "z",
+      "window_buckets": 30,
+      "k": 1.25,
+      "validated": false
+    },
+    "12h": {
+      "method": "pct",
+      "window_buckets": 60,
+      "horizon_buckets": 8,
+      "model": "distilbart-mnli-12-3-zs",
+      "greed_pct": 95.0,
+      "fear_pct": 5.0,
+      "oos_spread_pct": -0.974,
+      "oos_t": -0.79
+    },
+    "1d": {
+      "method": "pct",
+      "window_buckets": 120,
+      "horizon_buckets": 7,
+      "model": "distilbart-mnli-12-3-zs",
+      "greed_pct": 95.0,
+      "fear_pct": 5.0,
+      "oos_spread_pct": -5.157,
+      "oos_t": null
+    },
+    "3d": {
+      "method": "z",
+      "window_buckets": 30,
+      "k": 1.25,
+      "validated": false
+    },
+    "1w": {
+      "method": "z",
+      "window_buckets": 30,
+      "k": 1.25,
+      "validated": false,
+      "model": "cryptobert-full",
+      "recalibrated_on_current_scorer": false,
+      "note": "insufficient data (22 usable bars < 150); params unchanged for distilbart-mnli-12-3-zs; params kept from cryptobert-full"
+    }
+  },
+  "selection": {
+    "_doc": "Which sources/venues feed PRODUCTION posts (charts, grid, calibration). enabled=false -> source excluded from production; collect_raw=true -> still collected into data/raw.db for monitoring/re-evaluation. action: filter = admitted after btcsent/filters.py quality filters; drop = raw archive only. Venue key = '<venue> <kind>' (or '<venue>' or '*'). Evidence (2026-10-09): 468 blind hand labels (260 diagnosis + 208 venue-stratified, data/quality/labels.db); corr = same-day Pearson corr of the venue's daily net bull-bear share (cutoff 0.7, full-text scores) with BTC daily log return over ~173 days. Decision rule: keep if kept-precision >= 0.6, kept-accuracy >= 0.55, >= 5 kept posts/day, consistent collection history, and it does not dilute the combined signal. Re-evaluate: python quality.py venues",
+    "reddit": {
+      "enabled": true,
+      "collect_raw": true,
+      "why": "Retail discussion with full 180-day history via Arctic Shift; carries the price-mood information (combined corr 0.208, circular-shift p=0.006).",
+      "venues": {
+        "r/Bitcoin comment": {
+          "action": "filter",
+          "why": "KEEP, heavy filtering: 38% of raw kept (bots/mod notices, dups, <5 words, off-topic tech/politics removed). Kept precision 0.64 (n=55 kept labels), accuracy 0.71 at 0.7, corr 0.126, ~590 kept/day = backbone of the signal."
+        },
+        "r/Bitcoin post": {
+          "action": "filter",
+          "why": "KEEP filtered: kept precision 0.56 (n=18), accuracy 0.67, corr 0.115, ~34/day."
+        },
+        "r/BitcoinMarkets comment": {
+          "action": "filter",
+          "why": "KEEP: most market-focused venue. Kept precision 0.80 (n=20), corr 0.293 (best large venue), ~44/day; accuracy 0.55 (n=20, small). 7% bot share removed (Bitty_Bot, BitcoinMarkets_Bot)."
+        },
+        "r/BitcoinMarkets post": {
+          "action": "filter",
+          "why": "KEEP: same community as comments, ~1/day (3 labels, all relevant)."
+        },
+        "r/btc comment": {
+          "action": "filter",
+          "why": "KEEP filtered (under review): kept precision 0.62 (n=26), accuracy 0.69, corr 0.052 same-day / 0.237 vs 7-day return; removing it does not improve the combined corr (0.208 -> 0.203). Only 2.1% of posts mention BCH."
+        },
+        "r/btc post": {
+          "action": "filter",
+          "why": "KEEP filtered: precision 0.80 (n=5), corr 0.167, ~15/day."
+        },
+        "r/CryptoCurrency post": {
+          "action": "filter",
+          "why": "KEEP filtered (collected with BTC keyword filter): precision 0.83 (n=6), corr 0.422 over 53 days with >=10 posts; 13.5% duplicates removed."
+        },
+        "r/CryptoMarkets post": {
+          "action": "filter",
+          "why": "KEEP filtered: precision 0.75 (n=4), 16% duplicates removed; small (~5-12/day)."
+        },
+        "r/BitcoinBeginners post": {
+          "action": "drop",
+          "why": "DROP: lowest relevance of the Reddit venues (31.6% raw), ~3 kept/day, mostly custody/how-to questions; removing it has no measurable effect on the combined signal (0.209 vs 0.208)."
+        },
+        "*": {
+          "action": "drop",
+          "why": "venue not evaluated"
+        }
+      }
+    },
+    "bitcointalk": {
+      "enabled": false,
+      "collect_raw": true,
+      "why": "DROP from production: (1) its daily sentiment carries ~no price information (corr 0.039; Speculation board -0.077) and adding it to Reddit dilutes the combined corr 0.208 -> 0.135 (second half 0.149 -> 0.021); (2) structural tilt: model 14% bull / 2% bear every day regardless of price (signature-campaign essays such as 'patience is key in Bitcoin investment'); kept accuracy 0.56 (n=71); (3) collection inconsistency: history before 2026-09-08 came from deep topic enumeration, after from 6 board pages, which shifts its bull share 57.1% -> 51.7% at that boundary. Still collected into raw.db so it can be re-evaluated once collection is made uniform.",
+      "venues": {
+        "*": {
+          "action": "drop",
+          "why": "source disabled (see why)"
+        }
+      }
+    },
+    "4chan": {
+      "enabled": false,
+      "collect_raw": true,
+      "why": "DROP: kept precision 0.43 (n=21 kept labels; the worst venue: more than half of the kept /biz/ posts are off-topic or about other coins), only ~22 days of history (no archive), adding it to Reddit changes the combined corr by +0.004 (noise). Raw collection continues for monitoring.",
+      "venues": {
+        "*": {
+          "action": "drop",
+          "why": "source disabled"
+        }
+      }
+    },
+    "telegram": {
+      "enabled": false,
+      "collect_raw": false,
+      "why": "DROP: these are news/promo channels, not retail voices (6 channel 'authors', casino sponsorships); kept accuracy 0.34 at 0.7 (n=35): headlines read as neutral by the model while their market implication is polar; 0.1-4.7 kept posts/day per channel. Collection stopped.",
+      "venues": {
+        "*": {
+          "action": "drop",
+          "why": "source disabled"
+        }
+      }
+    },
+    "farcaster": {
+      "enabled": false,
+      "collect_raw": false,
+      "why": "DROP: kept accuracy 0.47 (n=17), recall of the relevance filter 0.59, 12-13% non-English (Vietnamese market recaps leak through), many automated market-recap casts, only ~30 days of history and 0.7-7.6 kept posts/day. Collection stopped.",
+      "venues": {
+        "*": {
+          "action": "drop",
+          "why": "source disabled"
+        }
+      }
+    },
+    "_candidates_tested": {
+      "stocktwits": "api.stocktwits.com streams/symbol/BTC.X -> HTTP 403 Cloudflare challenge from the box (2026-10-09): not usable keyless.",
+      "bluesky": "public.api.bsky.app searchPosts -> HTTP 403 (2026-10-09): not usable keyless."
+    }
+  },
+  "quality": {
+    "_doc": "Per-post filters (btcsent/filters.py). Bump filter_version whenever a rule changes, then: python quality.py rebuild. conf_cutoff = min max-probability for a bull/bear label (else neutral) for the CURRENT scorer (config scorer.model); used by chart.py, grid.py and calibrate.py.",
+    "filter_version": 1,
+    "conf_cutoff": 0.6,
+    "min_words": 5,
+    "min_words_strict": true,
+    "min_market_hits": 1,
+    "english_only": true,
+    "bot_authors": [
+      "AutoModerator",
+      "Bitcoin-ModTeam",
+      "BitcoinMarkets_Bot",
+      "Bitty_Bot",
+      "BobClawblaw",
+      "ChartBuddy",
+      "Cryptocom4life",
+      "DirtyKeybot",
+      "JohnLemonBot",
+      "MelangeBot",
+      "RemindMeBot",
+      "[deleted]",
+      "btc-ModTeam",
+      "coinfeeds-bot",
+      "dca-bot",
+      "escodelrio",
+      "lntipbot",
+      "rBitcoinMod"
+    ],
+    "not_bot_authors": [
+      "botle",
+      "Botnake",
+      "Botlenose",
+      "Both-Garden-1612",
+      "Bottle_and_Sell_it",
+      "Bottomofthedesk"
+    ],
+    "extra_bot_text_regex": [
+      "Daily BTC Volume Weighted Average Prices",
+      "goal = [\\d.]+ ?% ?\\|",
+      "^!bb\\b",
+      "^Prediction logged for u/",
+      "Historical Bitcoin prices for today"
+    ],
+    "extra_spam_regex": [],
+    "apply_margin": 0.01,
+    "min_heldout": 60,
+    "changelog": [
+      {
+        "date": "2026-10-09 20:33 (UTC+8)",
+        "filter_version": 1,
+        "change": {
+          "conf_cutoff": [
+            0.7,
+            0.6
+          ],
+          "scorer": [
+            "cryptobert-full",
+            "distilbart-mnli-12-3-zs"
+          ]
+        },
+        "why": "approved production scorer switch; cutoff 0.60 tuned on the train fold (experiments E8c); CryptoBERT rows keep 0.7 via scorer.model_cutoffs"
+      }
+    ]
+  },
+  "ratio_buckets": {
+    "_doc": "Pos/Neg ratio bucket per chart interval (shared by chart.py defaults and calibrate.py). Clean Reddit-only signal at conf 0.7 has ~4-5 polar posts/hour: 1h buckets were <8 polar 85% of the time and 2h 55% (last 30 d), 4h 22%. So intraday charts use 4h ratio bars; horizons keep the old wall-clock lengths (15m: 4h, 30m: 8h, 1h: 12h).",
+    "ratio_tf": {
+      "15m": "4h",
+      "30m": "4h",
+      "1h": "4h"
+    },
+    "horizon_bars": {
+      "15m": 1,
+      "30m": 2,
+      "1h": 3
+    }
+  },
+  "scorer": {
+    "_doc": "Production sentiment scorer for NEW posts (collect.py) and the background history rescore (rescore.py). Zero-shot NLI: softmax over the entailment logits of 'The author is {bearish|neutral|bullish} about the price of Bitcoin.', premise = first max_chars chars. Each post stores its model name; labels use that model's cutoff: the current model's cutoff is quality.conf_cutoff, legacy models use model_cutoffs. chart.py marks a 'scorer change' where a window mixes models; calibrate.py and quality.py use current-model data only.",
+    "model": "distilbart-mnli-12-3-zs",
+    "hf_id": "valhalla/distilbart-mnli-12-3",
+    "template": "The author is {} about the price of Bitcoin.",
+    "labels": [
+      "bearish",
+      "neutral",
+      "bullish"
+    ],
+    "max_chars": 2000,
+    "batch": 8,
+    "threads": 4,
+    "model_cutoffs": {
+      "cryptobert-full": 0.7
+    },
+    "rescore_pause": [
+      "07:25-08:10"
+    ],
+    "switched": "2026-10-09 20:33 (UTC+8)",
+    "evidence": "experiments E8c (2026-10-09): held-out hand labels kappa 0.433 / acc 0.723 at cutoff 0.60 (tuned on train fold) vs CryptoBERT 0.172 / 0.671; signal tests on a 100-posts/day sample in experiments/results.jsonl."
+  },
+  "positioning": {
+    "_doc": "OKX BTC-USDT-SWAP long/short ACCOUNT ratio (5m/1H/4H/1D) + realized funding, updated every collect cycle into sentiment.db:positioning (btcsent/positioning.py). Separate 'retail positioning' panel; never mixed into the Reddit sentiment. Coincident swing marker (lower at highs, higher at lows after removing price), not predictive -> no zones (P1/P1b walk-forward OOS zone spread not significant).",
+    "enabled": true,
+    "inst": "BTC-USDT-SWAP",
+    "periods": [
+      "5m",
+      "1H",
+      "4H",
+      "1D"
+    ]
+  },
+  "alt_sources": {
+    "_doc": "ARCHIVE-ONLY retail sources (YouTube/TikTok comments, X posts). Stored in data/raw.db alt_items/alt_comments/x_posts/x_users, scored into raw.db alt_sentiment (source youtube|tiktok|x). NOT read by chart.py/grid.py/calibrate.py (production stays Reddit-only). Run by alt_collect.py at the end of collect.py (skips :00 cycle and 07:20-08:15). Added 2026-10-10 for a later validation backtest.",
+    "enabled": true,
+    "youtube_every_min": 55,
+    "tiktok_every_min": 115,
+    "score_budget_sec": 90,
+    "score_max_per_cycle": 400,
+    "hard_timeout_sec": 360,
+    "youtube": {
+      "channels": {
+        "Road To $1 Million": "UCd-Rt1oQGAVjOdwPVYsZbjQ",
+        "Crypto Jebb": "UCviqt5aaucA1jP3qFmorZLQ",
+        "More Crypto Online": "UCngIhBkikUe6e7tZTjpKK7Q",
+        "Crypto World": "UCgY66N1YS_G9lYMvCQko6yw",
+        "Mark Moss": "UC9ZM3N0ybRtp44-WLqsW3iQ",
+        "Altcoin Daily": "@AltcoinDaily",
+        "Crypto Banter": "@CryptoBanter",
+        "Benjamin Cowen": "@intothecryptoverse",
+        "Coin Bureau": "@CoinBureau",
+        "InvestAnswers": "@InvestAnswers",
+        "Crypto Nutshell": "UC1owqQFqzvOP5hEWBINpDWg"
+      }
+    },
+    "tiktok": {}
+  }
+}

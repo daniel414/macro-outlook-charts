@@ -1,0 +1,12 @@
+# runtime outputs (rebuilt on every run)
+btc/data/
+btc/out/
+btc/__pycache__/
+btc/btcsent/__pycache__/
+onchain/raw/
+onchain/publish/
+onchain/*.csv
+onchain/*.html
+onchain/*.png
+onchain/onchain_text.txt
+onchain/__pycache__/

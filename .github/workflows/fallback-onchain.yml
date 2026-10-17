@@ -1,0 +1,56 @@
+# FALLBACK for LINE /btccheckonchain. Bitcoin Analysis (Grok Bot) runs update_onchain.py daily at 07:00 UTC+8.
+# This only publishes when btc/onchain_latest.json is older than today 06:30 UTC+8 at 08:40 / 12:40 UTC+8.
+name: fallback-onchain
+on:
+  schedule:
+    - cron: "40 0 * * *"          # 08:40 UTC+8
+    - cron: "40 4 * * *"          # 12:40 UTC+8 (second chance if the 08:40 run was skipped/delayed or CheckOnChain was down)
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry-run (build + compare, no writes) or publish"
+        type: choice
+        options: [dry-run, publish]
+        default: dry-run
+      force:
+        description: "ignore staleness"
+        type: boolean
+        default: false
+permissions:
+  contents: write
+concurrency:
+  group: fallback-onchain
+  cancel-in-progress: false
+env:
+  TZ: Asia/Taipei
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  GH_CHARTS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  ONCHAIN_DUE: "06:30"
+jobs:
+  fallback:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          sparse-checkout: |
+            scripts
+            .github
+      - id: check
+        env:
+          FORCE: ${{ (github.event_name == 'workflow_dispatch' && inputs.force) && '1' || '0' }}
+        run: python3 scripts/check_stale.py onchain
+      - if: steps.check.outputs.stale == 'true' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'dry-run')
+        uses: ./.github/actions/setup-render
+      - if: steps.check.outputs.stale == 'true' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'dry-run')
+        working-directory: scripts/onchain
+        run: python fallback_onchain.py --mode "${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'publish' }}"
+      - if: github.event_name == 'workflow_dispatch' && inputs.mode == 'dry-run'
+        uses: actions/upload-artifact@v4
+        with:
+          name: onchain-dry-run
+          path: |
+            scripts/onchain/onchain_text.txt
+            scripts/onchain/onchain_summary.png
+          retention-days: 3

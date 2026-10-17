@@ -1,0 +1,59 @@
+# FALLBACK for LINE /btc. Bitcoin Analysis (Grok Bot) stays the primary publisher (hourly ~:05-:13 UTC+8).
+# This only publishes when btc/latest.json is stale: bot publish >= 80 min old, or our own fallback publish >= 50 min old.
+name: fallback-btc
+on:
+  schedule:
+    - cron: "35 * * * *"          # every hour at :35 (UTC+8 :35), ~25 min after the bot's usual run
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry-run (build + compare, no writes) or publish"
+        type: choice
+        options: [dry-run, publish]
+        default: dry-run
+      force:
+        description: "ignore staleness"
+        type: boolean
+        default: false
+permissions:
+  contents: write
+concurrency:
+  group: fallback-btc
+  cancel-in-progress: false
+env:
+  TZ: Asia/Taipei
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  GH_CHARTS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  GHR_OVERRIDE: ${{ github.repository }}
+  BOT_MAX_AGE_MIN: "80"
+  SELF_MAX_AGE_MIN: "50"
+jobs:
+  fallback:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          sparse-checkout: |
+            scripts
+            .github
+      - id: check
+        env:
+          FORCE: ${{ (github.event_name == 'workflow_dispatch' && inputs.force) && '1' || '0' }}
+        run: python3 scripts/check_stale.py btc
+      - if: steps.check.outputs.stale == 'true' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'dry-run')
+        uses: ./.github/actions/setup-render
+      - if: steps.check.outputs.stale == 'true' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'dry-run')
+        working-directory: scripts/btc
+        run: |
+          MODE="${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'publish' }}"
+          FORCE_ARG="${{ (github.event_name == 'workflow_dispatch' && inputs.force) && '--force' || '' }}"
+          python fallback_btc.py --mode "$MODE" $FORCE_ARG
+      - if: github.event_name == 'workflow_dispatch' && inputs.mode == 'dry-run'
+        uses: actions/upload-artifact@v4
+        with:
+          name: btc-dry-run
+          path: |
+            scripts/btc/out/fallback/
+          retention-days: 3

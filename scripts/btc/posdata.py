@@ -1,0 +1,183 @@
+#!/usr/bin/env python3
+"""Positioning data fetcher (free, keyless) -> data/positioning2.db, table series(src,metric,tf,ts,value).
+
+  python posdata.py              # incremental (latest pages), run every 15 min from run_collect.sh
+  python posdata.py --backfill   # one-off: page OKX/Gate history fully, Bitfinex 1m since --bfx-since
+
+Sources: OKX rubik (all-account L/S, top-trader account/position L/S, OI), Gate.io contract_stats (BTC_USDT; account
+L/S, top-trader account/size L/S, OI usd, funding; max 180d), Bitfinex stats1 pos.size long/short (1m -> stored as
+hourly last value, tf=1H), Hyperliquid metaAndAssetCtxs (BTC OI snapshot, tf=snap). Binance live API (451)/Bybit (403) blocked; Binance via data.binance.vision daily dumps (table binance, 1-2 day lag).
+ts = bucket start, unix seconds UTC.
+"""
+import argparse, json, sqlite3, sys, time, urllib.request
+from pathlib import Path
+ROOT = Path(__file__).resolve().parent
+DB = ROOT / "data" / "positioning2.db"
+UA = {"User-Agent": "curl/8.5", "Content-Type": "application/json"}
+OKX = "https://www.okx.com/api/v5/rubik/stat/contracts/"
+INST = "BTC-USDT-SWAP"
+
+
+def get(url, data=None, tries=4):
+    for i in range(tries):
+        try:
+            req = urllib.request.Request(url, data=data, headers=UA)
+            return json.load(urllib.request.urlopen(req, timeout=30))
+        except Exception as e:
+            if i == tries - 1:
+                raise
+            time.sleep(2 + 3 * i)
+
+
+def db():
+    con = sqlite3.connect(DB, timeout=60)
+    con.execute("PRAGMA journal_mode=WAL")
+    con.execute("CREATE TABLE IF NOT EXISTS series(src TEXT, metric TEXT, tf TEXT, ts INTEGER, value REAL, PRIMARY KEY(src,metric,tf,ts))")
+    return con
+
+
+def put(con, rows):
+    con.executemany("INSERT OR REPLACE INTO series VALUES (?,?,?,?,?)", rows); con.commit()
+
+
+def okx(con, backfill):
+    eps = {"ls_account": "long-short-account-ratio-contract", "top_ls_account": "long-short-account-ratio-contract-top-trader",
+           "top_ls_position": "long-short-position-ratio-contract-top-trader", "oi": "open-interest-history"}
+    n = 0
+    for m, ep in eps.items():
+        for tf in ("1H", "4H", "1D"):
+            end = None
+            for _ in range(40 if backfill else 1):
+                url = f"{OKX}{ep}?instId={INST}&period={tf}&limit=100" + (f"&end={end}" if end else "")
+                d = get(url)["data"]
+                if not d:
+                    break
+                if m == "oi":   # [ts, oi contracts, oiCcy (BTC), oiUsd]
+                    rows = [("okx", "oi_usd", tf, int(r[0]) // 1000, float(r[3])) for r in d] + \
+                           [("okx", "oi_btc", tf, int(r[0]) // 1000, float(r[2])) for r in d]
+                else:
+                    rows = [("okx", m, tf, int(r[0]) // 1000, float(r[1])) for r in d]
+                put(con, rows); n += len(rows); end = d[-1][0]
+                if len(d) < 100:
+                    break
+                time.sleep(0.25)
+    return n
+
+
+def gate(con, backfill):
+    n = 0; now = int(time.time())
+    for iv, tf, step in (("1h", "1H", 3600), ("4h", "4H", 14400), ("1d", "1D", 86400)):
+        frm = now - 179 * 86400 if backfill else now - 12 * step
+        d = []
+        while True:   # max 2000 rows per call -> page forward
+            p = get(f"https://api.gateio.ws/api/v4/futures/usdt/contract_stats?contract=BTC_USDT&interval={iv}&limit=2000&from={frm}")
+            d += p
+            if len(p) < 2000:
+                break
+            frm = int(p[-1]["time"]) + step
+        rows = []
+        for r in d:
+            t = int(r["time"])
+            lu, su = r.get("long_users") or 0, r.get("short_users") or 0
+            vals = {"ls_account": r.get("lsr_account"), "top_ls_account": r.get("top_lsr_account"), "top_ls_position": r.get("top_lsr_size"),
+                    "oi_usd": r.get("open_interest_usd"), "funding": float(r["last_funding_rate"]) if r.get("last_funding_rate") not in (None, "") else None,
+                    "long_users": lu, "short_users": su}
+            rows += [("gate", k, tf, t, float(v)) for k, v in vals.items() if v is not None]
+        put(con, rows); n += len(rows)
+    return n
+
+
+def bitfinex(con, since_ms=None):
+    """1m pos.size long/short -> hourly last value (tf=1H)."""
+    n = 0
+    for side in ("long", "short"):
+        if since_ms is None:
+            last = con.execute("SELECT max(ts) FROM series WHERE src='bitfinex' AND metric=? AND tf='1H'", (side,)).fetchone()[0]
+            start = max(last * 1000 if last else 0, int(time.time() * 1000) - 3 * 86400000)   # backfill fills older gaps
+        else:
+            start = since_ms
+        while True:
+            d = get(f"https://api-pub.bitfinex.com/v2/stats1/pos.size:1m:tBTCUSD:{side}/hist?limit=10000&sort=1&start={start}")
+            if not d:
+                break
+            hourly = {}
+            for t, v in d:
+                hourly[(t // 1000) // 3600 * 3600] = float(v)   # ascending -> keeps last value in the hour
+            put(con, [("bitfinex", side, "1H", k, v) for k, v in hourly.items()]); n += len(hourly)
+            if len(d) < 10000:
+                break
+            start = d[-1][0] + 1
+            time.sleep(1.2)   # public rate limit
+    return n
+
+
+def hyperliquid(con):
+    a = get("https://api.hyperliquid.xyz/info", data=json.dumps({"type": "metaAndAssetCtxs"}).encode())
+    i = [u["name"] for u in a[0]["universe"]].index("BTC"); c = a[1][i]
+    t = int(time.time()) // 900 * 900
+    oi = float(c["openInterest"]); px = float(c["markPx"])
+    put(con, [("hyperliquid", "oi_btc", "snap", t, oi), ("hyperliquid", "oi_usd", "snap", t, oi * px),
+              ("hyperliquid", "funding_1h", "snap", t, float(c["funding"]))])
+    return 3
+
+
+def kraken_daily(con):
+    """Daily BTC/USD close (720 days) for the ahr999 index; FRED CBBTCUSD in data/macro.db covers older history."""
+    d = get("https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=1440")["result"]
+    rows = [("kraken", "close", "1D", int(r[0]), float(r[4])) for r in d["XXBTZUSD"]]
+    put(con, rows); return len(rows)
+
+
+BNB = "https://data.binance.vision/data/futures/um/daily/metrics/BTCUSDT/BTCUSDT-metrics-{}.zip"
+BCOLS = ["sum_open_interest", "sum_open_interest_value", "count_toptrader_long_short_ratio",
+         "sum_toptrader_long_short_ratio", "count_long_short_ratio", "sum_taker_long_short_vol_ratio"]
+
+
+def binance(con, since="2024-01-01"):
+    """Binance UM BTCUSDT 5m metrics from data.binance.vision (official public daily dumps, 1-2 day lag).
+    Table binance(ts UTC sec, oi_btc, oi_usd, top_account, top_position, global_account, taker_ratio).
+    Fetches every day after the latest stored one (or from `since`); missing (404) recent days are skipped quietly."""
+    import io, csv, zipfile, datetime as dt, urllib.error
+    con.execute("CREATE TABLE IF NOT EXISTS binance(ts INTEGER PRIMARY KEY, oi_btc REAL, oi_usd REAL, top_account REAL,"
+                " top_position REAL, global_account REAL, taker_ratio REAL)")
+    mx = con.execute("SELECT MAX(ts) FROM binance").fetchone()[0]
+    d = dt.date.fromisoformat(since) if mx is None else dt.datetime.fromtimestamp(mx, dt.timezone.utc).date()
+    today = dt.datetime.now(dt.timezone.utc).date(); n = 0
+    while d < today:
+        try:
+            b = urllib.request.urlopen(urllib.request.Request(BNB.format(d), headers={"User-Agent": "curl/8.5"}), timeout=60).read()
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                d += dt.timedelta(days=1); continue
+            raise
+        z = zipfile.ZipFile(io.BytesIO(b)); rows = []
+        for r in csv.DictReader(io.TextIOWrapper(z.open(z.namelist()[0]))):
+            try:
+                ts = int(dt.datetime.fromisoformat(r["create_time"]).replace(tzinfo=dt.timezone.utc).timestamp())
+                rows.append((ts, *[float(r[c]) if r.get(c) not in (None, "") else None for c in BCOLS]))
+            except (KeyError, ValueError):
+                continue
+        con.executemany("INSERT OR REPLACE INTO binance VALUES (?,?,?,?,?,?,?)", rows); con.commit(); n += len(rows)
+        d += dt.timedelta(days=1); time.sleep(0.3)
+    return n
+
+
+def main():
+    ap = argparse.ArgumentParser(); ap.add_argument("--backfill", action="store_true")
+    ap.add_argument("--bfx-since", default="2024-01-01"); ap.add_argument("--only")
+    a = ap.parse_args(); con = db(); ok = True
+    import datetime as dt
+    jobs = {"okx": lambda: okx(con, a.backfill), "gate": lambda: gate(con, a.backfill), "hyperliquid": lambda: hyperliquid(con), "kraken": lambda: kraken_daily(con), "binance": lambda: binance(con),
+            "bitfinex": lambda: bitfinex(con, int(dt.datetime.fromisoformat(a.bfx_since).replace(tzinfo=dt.timezone.utc).timestamp() * 1000) if a.backfill else None)}
+    for k, f in jobs.items():
+        if a.only and k not in a.only.split(","):
+            continue
+        try:
+            print(f"[{time.strftime('%F %T')}] posdata {k}: {f()} rows", flush=True)
+        except Exception as e:
+            ok = False; print(f"[{time.strftime('%F %T')}] posdata {k} FAILED: {e!r}", flush=True)
+    sys.exit(0 if ok else 1)
+
+
+if __name__ == "__main__":
+    main()

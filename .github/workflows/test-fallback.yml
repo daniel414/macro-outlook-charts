@@ -1,0 +1,34 @@
+# TEMPORARY: branch test of the fallbacks in dry-run mode (no writes). Removed before merge.
+name: test-fallback
+on:
+  push:
+    branches: [gha-fallback]
+permissions:
+  contents: read
+env:
+  TZ: Asia/Taipei
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  GH_CHARTS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  GHR_OVERRIDE: ${{ github.repository }}
+jobs:
+  btc:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 1, sparse-checkout: "scripts\n.github" }
+      - run: python3 scripts/check_stale.py btc && python3 scripts/check_stale.py onchain
+      - uses: ./.github/actions/setup-render
+      - working-directory: scripts/btc
+        run: time python fallback_btc.py --mode dry-run
+      - uses: actions/upload-artifact@v4
+        with: { name: btc-dry-run, path: scripts/btc/out/fallback/, retention-days: 3 }
+  onchain:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 1, sparse-checkout: "scripts\n.github" }
+      - uses: ./.github/actions/setup-render
+      - working-directory: scripts/onchain
+        run: time python fallback_onchain.py --mode dry-run
+      - uses: actions/upload-artifact@v4
+        with: { name: onchain-dry-run, path: "scripts/onchain/onchain_text.txt\nscripts/onchain/onchain_summary.png", retention-days: 3 }
