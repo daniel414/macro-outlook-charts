@@ -188,6 +188,20 @@ def publish_kol(when, stamp):
             gh_put("btc/kol_latest.json", json.dumps(k, ensure_ascii=False, indent=1).encode(), "btc kol latest " + stamp)
     except Exception as e:
         print("kol image skipped:", e, file=sys.stderr)
+def add_structure(text):
+    """Insert the objective structure section (btc_structure.py, run as a script) before 【Binance…】, else at the end.
+    Skipped silently on any failure/timeout or if the text already has it; never blocks /btc."""
+    try:
+        if "【技術結構" in text: return text
+        m = re.search(r"｜BTC ([\d,]+(?:\.\d+)?)", "\n".join(text.splitlines()[:3]))
+        cmd = [sys.executable, os.path.join(HERE, "btc_structure.py")] + (["--price", m.group(1).replace(",", "")] if m else [])
+        sec = subprocess.run(cmd, cwd=HERE, capture_output=True, text=True, timeout=45).stdout.strip()
+        if not sec.startswith("【技術結構") or len(sec.splitlines()) != 2: return text
+        blk = "\n\n" + DIV + "\n" + sec
+        i = text.find("\n\n" + DIV + "\n【Binance")
+        return (text[:i] + blk + text[i:] if i >= 0 else text + blk)[:4900]
+    except Exception as e:
+        print("structure skipped:", e, file=sys.stderr); return text
 def main():
     a = argparse.ArgumentParser(); a.add_argument("--image"); a.add_argument("--json"); a.add_argument("--text"); a.add_argument("--dry-run", action="store_true"); a.add_argument("--kol-only", action="store_true", help="only analyst image + btc/kol_latest.json"); a = a.parse_args()
     if a.kol_only:
@@ -210,6 +224,7 @@ def main():
     if a.text: text = open(a.text).read().strip()[:4900]
     elif j: text = summary(j, when)
     else: sys.exit("need --text or --json (or run without args)")
+    text = add_structure(text)
     stamp = when.strftime("%Y%m%d_%H%M")
     os.makedirs(os.path.join(HERE, "out/publish"), exist_ok=True)
     big = os.path.join(HERE, f"out/publish/btc_positioning_{stamp}.jpg"); pre = big[:-4] + "_preview.jpg"
