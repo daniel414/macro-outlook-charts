@@ -5,7 +5,7 @@ Usage: btc_structure.py [--price 81912] [--json]  -> prints the section (title l
 Standalone, stdlib only; every failure -> empty output, exit 0."""
 import json, sys, urllib.request
 from datetime import datetime, timedelta, timezone
-TITLE = "【技術結構（客觀數據，非投資建議）】"
+TITLE = "【技術結構】"
 UA = {"User-Agent": "btc-structure/1.0"}
 def _get(u, t=10):
     return json.load(urllib.request.urlopen(urllib.request.Request(u, headers=UA), timeout=t))
