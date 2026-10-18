@@ -124,6 +124,20 @@ def watch_info(vid):
     return info
 
 
+def rss_published(vid):
+    """Fallback for 'published' when the watch page is bot-walled (RSS itself is flaky)."""
+    try:
+        _, xml = http_get(RSS_URL, tries=2)
+        m = re.search(r"<yt:videoId>" + re.escape(vid) + r"</yt:videoId>.*?<published>([^<]+)</published>", xml, re.S)
+        return m.group(1) if m else ""
+    except Exception:
+        return ""
+
+
+def now_utc():
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def oembed_title(vid):
     try:
         _, txt = http_get(f"https://www.youtube.com/oembed?format=json&url=https://www.youtube.com/watch?v={vid}", tries=2)
@@ -190,7 +204,8 @@ def main():
             vid, title = vids[0]["video_id"], vids[0]["title"]
         info = watch_info(vid)
         payload = {"video_id": vid, "title": title or info["title"] or oembed_title(vid),
-                   "url": f"https://www.youtube.com/watch?v={vid}", "published": info["published"], "test": True}
+                   "url": f"https://www.youtube.com/watch?v={vid}",
+                   "published": info["published"] or rss_published(vid), "detected_at": now_utc(), "test": True}
         print(f"TEST MODE: {payload['video_id']} | {payload['title']} (state untouched)")
         code = post(payload)
         return 0 if 200 <= code < 300 else 1
@@ -222,7 +237,8 @@ def main():
             continue
         payload = {"video_id": v["video_id"], "title": v["title"] or info["title"] or oembed_title(v["video_id"]),
                    "url": f"https://www.youtube.com/watch?v={v['video_id']}",
-                   "published": v.get("published") or info["published"], "test": False}
+                   "published": v.get("published") or info["published"] or rss_published(v["video_id"]),
+                   "detected_at": now_utc(), "test": False}
         print(f"NEW: {payload['video_id']} | {payload['title']}")
         code = post(payload)
         if 200 <= code < 300:
