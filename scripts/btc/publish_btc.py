@@ -190,16 +190,18 @@ def publish_kol(when, stamp):
         print("kol image skipped:", e, file=sys.stderr)
 def add_structure(text):
     """Insert the objective structure section (btc_structure.py, run as a script) before 【Binance…】, else at the end.
-    Skipped silently on any failure/timeout or if the text already has it; never blocks /btc."""
+    Title 【技術結構】 (old title 【技術結構（客觀數據，非投資建議）】 also recognised): any existing structure block is
+    replaced by the fresh one, so it never appears twice. On any failure/timeout the text is returned unchanged."""
     try:
-        if "【技術結構" in text: return text
         m = re.search(r"｜BTC ([\d,]+(?:\.\d+)?)", "\n".join(text.splitlines()[:3]))
         cmd = [sys.executable, os.path.join(HERE, "btc_structure.py")] + (["--price", m.group(1).replace(",", "")] if m else [])
         sec = subprocess.run(cmd, cwd=HERE, capture_output=True, text=True, timeout=45).stdout.strip()
         if not sec.startswith("【技術結構") or len(sec.splitlines()) != 2: return text
+        old = re.compile(r"\n*" + re.escape(DIV) + r"\n【技術結構(?:】|（客觀數據，非投資建議）】)\n(?:・[^\n]*(?:\n|$))*")
+        t = old.sub("\n", text).rstrip()   # drop any existing structure block (new or old title)
         blk = "\n\n" + DIV + "\n" + sec
-        i = text.find("\n\n" + DIV + "\n【Binance")
-        return (text[:i] + blk + text[i:] if i >= 0 else text + blk)[:4900]
+        i = t.find("\n\n" + DIV + "\n【Binance")
+        return (t[:i] + blk + t[i:] if i >= 0 else t + blk)[:4900]
     except Exception as e:
         print("structure skipped:", e, file=sys.stderr); return text
 def main():
