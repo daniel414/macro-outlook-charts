@@ -139,7 +139,8 @@ def summary(j, when, ai):
         L += sec(f"【Binance（延遲，截至 {P.bdate(g('binance_asof'))}）】",
                  f"・全部 {pct(g('binance_多空差值_全部'))}｜大戶持倉 {pct(g('binance_多空差值_大戶持倉'))}",
                  f"・巨鯨vs散戶 {f1(g('binance_巨鯨散戶差'),2)}")
-    return P.EMOJI.sub("", "\n".join(L))[:4900]
+    # objective structure section (btc_structure.py via publish_btc.add_structure); omitted on any failure
+    return P.add_structure(P.EMOJI.sub("", "\n".join(L))[:4900])
 
 
 def build_images(png, stamp):
