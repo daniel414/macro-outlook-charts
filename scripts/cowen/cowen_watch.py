@@ -124,6 +124,14 @@ def watch_info(vid):
     return info
 
 
+def oembed_title(vid):
+    try:
+        _, txt = http_get(f"https://www.youtube.com/oembed?format=json&url=https://www.youtube.com/watch?v={vid}", tries=2)
+        return json.loads(txt).get("title", "")
+    except Exception:
+        return ""
+
+
 def post(payload):
     url = os.environ["COWEN_WEBHOOK_URL"]
     key = os.environ["COWEN_WEBHOOK_KEY"]
@@ -181,7 +189,7 @@ def main():
             vids = [v for v in get_candidates() if v["eligible"]]
             vid, title = vids[0]["video_id"], vids[0]["title"]
         info = watch_info(vid)
-        payload = {"video_id": vid, "title": title or info["title"],
+        payload = {"video_id": vid, "title": title or info["title"] or oembed_title(vid),
                    "url": f"https://www.youtube.com/watch?v={vid}", "published": info["published"], "test": True}
         print(f"TEST MODE: {payload['video_id']} | {payload['title']} (state untouched)")
         code = post(payload)
@@ -212,7 +220,7 @@ def main():
         if info["upcoming"] or info["live_now"]:
             print(f"  skip {v['video_id']} (upcoming/live now), will retry later")
             continue
-        payload = {"video_id": v["video_id"], "title": v["title"] or info["title"],
+        payload = {"video_id": v["video_id"], "title": v["title"] or info["title"] or oembed_title(v["video_id"]),
                    "url": f"https://www.youtube.com/watch?v={v['video_id']}",
                    "published": v.get("published") or info["published"], "test": False}
         print(f"NEW: {payload['video_id']} | {payload['title']}")
