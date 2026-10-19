@@ -51,6 +51,19 @@ def series(con, src, metric, tf, start=None, end=None):
     return df.set_index("ts")["value"]
 
 
+def gate_series(con, metric, tf, start=None, end=None):
+    """Gate contract_stats rows are a snapshot taken when the bucket opens and are only finalised at close (= the last 1H row
+    in the bucket), so the in-progress 4H/1D row stays frozen at its opening value for up to a whole bar (2026-10-19: 09:12–11:16
+    publishes showed the 08:00 values). Use the last 1H row per bucket instead; closed buckets are identical."""
+    s = series(con, "gate", metric, tf, start, end)
+    if tf == "1H":
+        return s
+    h = series(con, "gate", metric, "1H", start, end)
+    if h.empty:
+        return s
+    return h.groupby(bucket_start(h.index.to_numpy(), STEP[tf])).last().combine_first(s).sort_index()
+
+
 STALE, ASOF = {}, {}
 FUND_OKX_MAX = 9 * 3600     # OKX settles every 8h; the last realized rate may legitimately be up to 8h old
 SNAP_MAX = 2 * 3600
@@ -232,7 +245,7 @@ def main():
     step = STEP[a.tf]; now = time.time(); w = step / 86400
     end_b = bucket_start(int(now), step) + step; start_b = end_b - a.bars * step
     con = sqlite3.connect(PDB)
-    S = lambda src, m, tf=a.tf: series(con, src, m, tf, start_b, end_b)
+    S = lambda src, m, tf=a.tf: gate_series(con, m, tf, start_b, end_b) if src == "gate" else series(con, src, m, tf, start_b, end_b)
     kl, exch = get_klines(a.tf.lower(), int(start_b), int(end_b)); kl = kl[(kl.index >= start_b) & (kl.index < end_b)]
     fails, cur = [], {}
     freshen(a.tf, fails)
