@@ -122,10 +122,10 @@ def summary(j, when, ai):
     px = f"BTC {g('btc'):,.0f}" if g("btc") else "BTC -"
     def sec(*lines): return ["", DIV, *lines]
     w = g("巨鯨散戶差_okx_4H")
-    whale = f"・巨鯨散戶差 {f1(w, 2)}（數字越負，大戶比散戶越偏空）" if w is not None else "・巨鯨散戶差 -"
+    whale = f"・巨鯨散戶差：OKX {f1(w, 2)}（數字越負，大戶比散戶越偏空）" if w is not None else "・巨鯨散戶差：OKX -"
     L = ["BTC 持倉數據", f"{when.strftime('%Y.%m.%d %H:%M')} (UTC+8)｜{px}"]
     blk = ["【散戶 vs 大戶】", ai.get("散戶", "散戶"),
-           f"・OKX 全體 {pct(g('多空差值_全部_okx'))}｜Gate {pct(g('多空差值_全部_gate'))}", "",
+           f"・全體帳戶：OKX {pct(g('多空差值_全部_okx'))}｜Gate {pct(g('多空差值_全部_gate'))}", "",
            ai.get("大戶", "大戶"),
            f"・大戶持倉：OKX {pct(g('多空差值_okx_大戶持倉'))}｜Gate {pct(g('多空差值_gate_大戶持倉'))}",
            f"・大戶帳戶：OKX {pct(g('多空差值_okx_大戶帳戶'))}｜Gate {pct(g('多空差值_gate_大戶帳戶'))}", whale]

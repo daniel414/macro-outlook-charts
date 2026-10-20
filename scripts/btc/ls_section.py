@@ -21,7 +21,10 @@ for s, n in [("okx", "OKX"), ("gate", "Gate"), ("bitget", "Bitget")]:
     for x in v:
         if x: t1h = max(t1h or 0, x[0])
     rows.append((n, *[x[1] if x else None for x in v]))
-bn = c.execute("select ts,global_account,top_account,top_position from binance where global_account is not null order by ts desc limit 1").fetchone()
+def bcol(col):   # newest non-null value per column (the newest 5m row is often only partly filled)
+    return c.execute(f"select ts,{col} from binance where {col} is not null order by ts desc limit 1").fetchone()
+bc = [bcol(k) for k in ("global_account", "top_account", "top_position")]
+bn = bc[0] and (bc[0][0], *[x[1] if x and bc[0][0] - x[0] <= BN_FRESH else None for x in bc])
 bfresh = bool(bn) and now - bn[0] <= BN_FRESH   # live www.binance.com rows; older = fell back to daily dumps
 rows.append(("Binance" if bfresh or not bn else "Binance*", *(bn[1:] if bn else (None,) * 3)))
 # order by latest BTC perp OI (USD), all must be <= MAXAGE, else fixed fallback order
@@ -40,6 +43,18 @@ else: rows.sort(key=lambda r: FIXED.index(key(r))); ORDER = "fixed"
 if os.environ.get("LS_DEBUG"):
     import sys
     print("ORDER", ORDER, {k: (None if v is None else (T(v[0]), round(v[1] / 1e9, 3))) for k, v in OI.items()}, file=sys.stderr)
+import sys
+if "--rvw" in sys.argv:
+    # lines for 【散戶 vs 大戶】: long%-short% = (r-1)/(r+1)*100, same OI order as 【多空比】
+    d = lambda v: "無資料" if v is None else f"{(v - 1) / (v + 1) * 100:+.1f}%"
+    def ln(lab, i):
+        xs = [r for r in rows if r[i] is not None]
+        if not xs: return None
+        return lab + "｜".join(f"{r[0]} {d(r[i])}" for r in rows if r[i] is not None or key(r) == "Binance")
+    out = [ln("・全體帳戶：", 1), ln("・大戶持倉：", 3), ln("・大戶帳戶：", 2)]
+    gap = [f"{r[0]} {r[3] - r[1]:+.2f}" for r in rows if key(r) in ("Binance", "OKX") and r[1] is not None and r[3] is not None]
+    if gap: out.append("・巨鯨散戶差：" + "｜".join(gap))
+    print("\n".join(x for x in out if x)); sys.exit(0)
 L = ["【多空比】" + (T(t1h) if t1h else ""), "OKX/Gate/Bitget 1H、Binance 5m"]
 NM = {"OKX": "OKX　　", "Gate": "Gate　 ", "Bitget": "Bitget　", "Binance": "Binance ", "Binance*": "Binance*"}
 def blk(title, i, note=None):

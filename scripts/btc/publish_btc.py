@@ -254,6 +254,29 @@ def add_longshort(text):
         return (t[:i] + "\n\n" + DIV + "\n" + sec + t[i:])[:4900]
     except Exception as e:
         print("longshort skipped:", e, file=sys.stderr); return text
+RVW_KEYS = ("・全體帳戶：", "・OKX 全體", "・全體：", "・大戶持倉：", "・大戶帳戶：", "・巨鯨散戶差")
+def add_rvw(text):
+    """Rewrite the data bullets inside 【散戶 vs 大戶】 with every exchange in positioning2.db (ls_section.py --rvw, run as a script),
+    same OI order as 【多空比】. Prose lines (散戶：/大戶：/解讀：) are kept. On any failure the text is returned unchanged."""
+    try:
+        out = subprocess.run([sys.executable, os.path.join(HERE, "ls_section.py"), "--rvw"], cwd=HERE, capture_output=True, text=True, timeout=45).stdout.strip()
+        new = {}
+        for ln in out.splitlines():
+            for k in ("・全體帳戶：", "・大戶持倉：", "・大戶帳戶：", "・巨鯨散戶差："):
+                if ln.startswith(k): new[k] = ln
+        if not new: return text
+        L = text.splitlines(); inblk = False; res = []
+        for ln in L:
+            if ln.startswith("【"): inblk = ln.startswith("【散戶 vs 大戶】")
+            if inblk and ln.startswith(RVW_KEYS):
+                k = "・全體帳戶：" if ln.startswith(("・全體帳戶：", "・OKX 全體", "・全體：")) else "・巨鯨散戶差：" if ln.startswith("・巨鯨散戶差") else ln[:6]
+                if k in new:
+                    m = re.search(r"（[^）]*）\s*$", ln) if k == "・巨鯨散戶差：" else None
+                    res.append(new.pop(k) + (m.group(0) if m else "")); continue
+            res.append(ln)
+        return "\n".join(res)[:4900]
+    except Exception as e:
+        print("rvw skipped:", e, file=sys.stderr); return text
 def main():
     a = argparse.ArgumentParser(); a.add_argument("--image"); a.add_argument("--json"); a.add_argument("--text"); a.add_argument("--dry-run", action="store_true"); a.add_argument("--kol-only", action="store_true", help="only analyst image + btc/kol_latest.json"); a = a.parse_args()
     if a.kol_only:
@@ -276,7 +299,7 @@ def main():
     if a.text: text = open(a.text).read().strip()[:4900]
     elif j: text = summary(j, when)
     else: sys.exit("need --text or --json (or run without args)")
-    text = add_notes(strip_hl(add_binance(add_longshort(add_structure(text)))))
+    text = add_notes(strip_hl(add_binance(add_longshort(add_rvw(add_structure(text))))))
     stamp = when.strftime("%Y%m%d_%H%M")
     os.makedirs(os.path.join(HERE, "out/publish"), exist_ok=True)
     big = os.path.join(HERE, f"out/publish/btc_positioning_{stamp}.jpg"); pre = big[:-4] + "_preview.jpg"
