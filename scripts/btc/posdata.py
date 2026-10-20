@@ -6,7 +6,7 @@
 
 Sources: OKX rubik (all-account L/S, top-trader account/position L/S, OI), Gate.io contract_stats (BTC_USDT; account
 L/S, top-trader account/size L/S, OI usd, funding; max 180d), Bitfinex stats1 pos.size long/short (1m -> stored as
-hourly last value, tf=1H), Hyperliquid metaAndAssetCtxs (BTC OI snapshot, tf=snap). Binance live API (451)/Bybit (403) blocked; Binance via data.binance.vision daily dumps (table binance, 1-2 day lag).
+hourly last value, tf=1H), Hyperliquid metaAndAssetCtxs (BTC OI snapshot, tf=snap) + hl_whales PROXY (top-100 leaderboard addresses' BTC positions; HL has no L/S ratio API). Binance live API (451)/Bybit (403) blocked; Binance via data.binance.vision daily dumps (table binance, 1-2 day lag).
 ts = bucket start, unix seconds UTC.
 """
 import argparse, json, sqlite3, sys, time, urllib.request
@@ -121,6 +121,65 @@ def hyperliquid(con):
     return 3
 
 
+HL_LB = "https://stats-data.hyperliquid.xyz/Mainnet/leaderboard"
+HL_TOPN = 100
+
+
+def hl_whales(con):
+    """PROXY (not an official ratio; Hyperliquid has no long/short-ratio API): BTC perp positions of the top-HL_TOPN
+    leaderboard addresses by accountValue (public clearinghouseState). Address list cached ~daily (leaderboard ~40MB).
+    Stores src=hyperliquid tf=snap: whale_long_btc, whale_short_btc, whale_ls_position (long/short size),
+    whale_long_n, whale_short_n, whale_ls_account (long/short count of addresses holding BTC)."""
+    cache = ROOT / "data" / "hl_top_addrs.json"
+    if not cache.exists() or time.time() - cache.stat().st_mtime > 86400:
+        r = get(HL_LB)["leaderboardRows"]
+        r.sort(key=lambda x: float(x["accountValue"]), reverse=True)
+        cache.write_text(json.dumps([x["ethAddress"] for x in r[:HL_TOPN]]))
+    addrs = json.loads(cache.read_text())
+    L = S = 0.0; nl = ns = 0
+    for a in addrs:
+        st = get("https://api.hyperliquid.xyz/info", data=json.dumps({"type": "clearinghouseState", "user": a}).encode())
+        for p in st.get("assetPositions", []):
+            q = p["position"]
+            if q["coin"] == "BTC":
+                z = float(q["szi"])
+                if z > 0: L += z; nl += 1
+                elif z < 0: S += -z; ns += 1
+        time.sleep(0.1)
+    t = int(time.time()) // 900 * 900
+    rows = [("hyperliquid", "whale_long_btc", "snap", t, L), ("hyperliquid", "whale_short_btc", "snap", t, S),
+            ("hyperliquid", "whale_long_n", "snap", t, nl), ("hyperliquid", "whale_short_n", "snap", t, ns)]
+    if S > 0: rows.append(("hyperliquid", "whale_ls_position", "snap", t, L / S))
+    if ns > 0: rows.append(("hyperliquid", "whale_ls_account", "snap", t, nl / ns))
+    put(con, rows); return len(rows)
+
+
+BG = "https://api.bitget.com/api/v2/mix/market/"
+
+
+def bitget(con):
+    """Bitget USDT-M BTCUSDT L/S ratios. Endpoint keeps only the latest 30 points per period (no paging), so history
+    accumulates from our own runs. long-short = all accounts; account-long-short / position-long-short = Bitget's
+    account / position ratio endpoints (docs: top-trader style). Stored src=bitget, tf=1H/4H."""
+    eps = {"ls_account": ("long-short", "longShortRatio"), "top_ls_account": ("account-long-short", "longShortAccountRatio"),
+           "top_ls_position": ("position-long-short", "longShortPositionRatio")}
+    n = 0
+    for m, (ep, k) in eps.items():
+        for tf, per in (("1H", "1h"), ("4H", "4h")):
+            d = get(f"{BG}{ep}?symbol=BTCUSDT&productType=usdt-futures&period={per}")["data"] or []
+            rows = [("bitget", m, tf, int(r["ts"]) // 1000, float(r[k])) for r in d]
+            put(con, rows); n += len(rows); time.sleep(0.2)
+    return n
+
+
+def deribit(con):
+    """Deribit has no long/short-ratio API. PROXY only: BTC-PERPETUAL OI (USD) and 8h funding snapshot."""
+    r = get("https://www.deribit.com/api/v2/public/ticker?instrument_name=BTC-PERPETUAL")["result"]
+    t = int(time.time()) // 900 * 900
+    put(con, [("deribit", "oi_usd", "snap", t, float(r["open_interest"])), ("deribit", "funding_8h", "snap", t, float(r["funding_8h"]))])
+    return 2
+
+
 def kraken_daily(con):
     """Daily BTC/USD close (720 days) for the ahr999 index; FRED CBBTCUSD in data/macro.db covers older history."""
     d = get("https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=1440")["result"]
@@ -167,7 +226,7 @@ def main():
     ap.add_argument("--bfx-since", default="2024-01-01"); ap.add_argument("--only")
     a = ap.parse_args(); con = db(); ok = True
     import datetime as dt
-    jobs = {"okx": lambda: okx(con, a.backfill), "gate": lambda: gate(con, a.backfill), "hyperliquid": lambda: hyperliquid(con), "kraken": lambda: kraken_daily(con), "binance": lambda: binance(con),
+    jobs = {"okx": lambda: okx(con, a.backfill), "gate": lambda: gate(con, a.backfill), "hyperliquid": lambda: hyperliquid(con), "hl_whales": lambda: hl_whales(con), "bitget": lambda: bitget(con), "deribit": lambda: deribit(con), "kraken": lambda: kraken_daily(con), "binance": lambda: binance(con),
             "bitfinex": lambda: bitfinex(con, int(dt.datetime.fromisoformat(a.bfx_since).replace(tzinfo=dt.timezone.utc).timestamp() * 1000) if a.backfill else None)}
     for k, f in jobs.items():
         if a.only and k not in a.only.split(","):
