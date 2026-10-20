@@ -86,7 +86,7 @@ def bootstrap():
     con = PD.db(); now = int(time.time()); fails = []
     jobs = [("okx", lambda: okx_recent(con, {"1H": 1, "4H": 2, "1D": 1})),
             ("gate", lambda: PD.gate(con, True)),
-            ("bitget", lambda: PD.bitget(con)),           # 【多空比】 Bitget 1H
+            ("bitget", lambda: PD.bitget(con)),           # 【多空比】 Bitget 1H + OI snapshot (exchange order by OI)
             ("kraken", lambda: PD.kraken_daily(con)),
             ("binance_www", lambda: PD.binance_www(con, True)),   # live 5m, www.binance.com/futures/data (~30d); fapi not used
             ("binance", lambda: PD.binance(con, since=(datetime.now(ZoneInfo("UTC")).date() - timedelta(days=33)).isoformat())),

@@ -24,6 +24,22 @@ for s, n in [("okx", "OKX"), ("gate", "Gate"), ("bitget", "Bitget")]:
 bn = c.execute("select ts,global_account,top_account,top_position from binance where global_account is not null order by ts desc limit 1").fetchone()
 bfresh = bool(bn) and now - bn[0] <= BN_FRESH   # live www.binance.com rows; older = fell back to daily dumps
 rows.append(("Binance" if bfresh or not bn else "Binance*", *(bn[1:] if bn else (None,) * 3)))
+# order by latest BTC perp OI (USD), all must be <= MAXAGE, else fixed fallback order
+FIXED = ["Binance", "OKX", "Bitget", "Gate"]
+def oi(src):
+    r = c.execute("select ts,value from series where src=? and metric='oi_usd' order by ts desc limit 1", (src,)).fetchone()
+    return r if r and now - r[0] <= MAXAGE else None
+bo = c.execute("select ts,coalesce(oi_usd, oi_btc*?) from binance where oi_usd is not null or oi_btc is not null order by ts desc limit 1",
+               (float(os.environ.get("BTC_PX", "0")) or None,)).fetchone()
+OI = {"OKX": oi("okx"), "Gate": oi("gate"), "Bitget": oi("bitget"),
+      "Binance": bo if bo and bo[1] and now - bo[0] <= MAXAGE else None}
+if os.environ.get("LS_TEST_DROP_OI"): OI[os.environ["LS_TEST_DROP_OI"]] = None
+key = lambda r: r[0].rstrip("*")
+if all(OI.values()): rows.sort(key=lambda r: -OI[key(r)][1]); ORDER = "oi"
+else: rows.sort(key=lambda r: FIXED.index(key(r))); ORDER = "fixed"
+if os.environ.get("LS_DEBUG"):
+    import sys
+    print("ORDER", ORDER, {k: (None if v is None else (T(v[0]), round(v[1] / 1e9, 3))) for k, v in OI.items()}, file=sys.stderr)
 L = ["【多空比】" + (T(t1h) if t1h else ""), "OKX/Gate/Bitget 1H、Binance 5m"]
 NM = {"OKX": "OKX　　", "Gate": "Gate　 ", "Bitget": "Bitget　", "Binance": "Binance ", "Binance*": "Binance*"}
 def blk(title, i, note=None):

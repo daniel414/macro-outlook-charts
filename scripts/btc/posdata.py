@@ -129,6 +129,12 @@ def bitget(con):
             d = get(f"{BG}{ep}?symbol=BTCUSDT&productType=usdt-futures&period={per}")["data"] or []
             rows = [("bitget", m, tf, int(r["ts"]) // 1000, float(r[k])) for r in d]
             put(con, rows); n += len(rows); time.sleep(0.2)
+    try:   # OI snapshot (USD = holdingAmount BTC x markPrice) from public ticker
+        r = get(f"{BG}ticker?symbol=BTCUSDT&productType=usdt-futures")["data"][0]
+        t = int(r["ts"]) // 1000; btc = float(r["holdingAmount"])
+        put(con, [("bitget", "oi_btc", "snap", t, btc), ("bitget", "oi_usd", "snap", t, btc * float(r["markPrice"]))]); n += 2
+    except Exception as e:
+        print("bitget oi fail", e)
     return n
 
 
