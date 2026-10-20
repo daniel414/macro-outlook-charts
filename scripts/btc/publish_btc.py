@@ -230,6 +230,18 @@ def strip_hl(text):
     t = re.sub(r"｜HL \$[^｜\n]*", "", text)
     t = re.sub(r"\n・每 1h：HL [^\n]*", "", t)
     return re.sub(r"\n[^\n]*(?:Hyperliquid|HL\*\*)[^\n]*", "", t)
+NOTE_POS = "（看金額：大戶多單減空單部位差）"
+NOTE_ACC = "（看人數：大戶多空帳戶數差）"
+NOTE_BN = "（大戶持倉看金額：保證金前 20%）"
+def add_notes(text):
+    """One-line plain-language note under each 大戶持倉/大戶帳戶 % line (diff = long% - short%) and the Binance line. Idempotent."""
+    out = []; L = text.splitlines()
+    for i, ln in enumerate(L):
+        out.append(ln)
+        nx = L[i + 1] if i + 1 < len(L) else ""
+        note = NOTE_POS if ln.startswith("・大戶持倉：") else NOTE_ACC if ln.startswith("・大戶帳戶：") else NOTE_BN if (ln.startswith("・全部 ") and "大戶持倉" in ln) else None
+        if note and not ("看金額" in nx or "看人數" in nx): out.append(note)
+    return "\n".join(out)[:4900]
 def add_longshort(text):
     """Insert 【多空比】 (ls_section.py, run as a script) right before 【未平倉量】 (i.e. after 【散戶 vs 大戶】).
     Any existing 【多空比】 block is replaced, so it appears once. On failure the text is returned unchanged."""
@@ -264,7 +276,7 @@ def main():
     if a.text: text = open(a.text).read().strip()[:4900]
     elif j: text = summary(j, when)
     else: sys.exit("need --text or --json (or run without args)")
-    text = strip_hl(add_binance(add_longshort(add_structure(text))))
+    text = add_notes(strip_hl(add_binance(add_longshort(add_structure(text)))))
     stamp = when.strftime("%Y%m%d_%H%M")
     os.makedirs(os.path.join(HERE, "out/publish"), exist_ok=True)
     big = os.path.join(HERE, f"out/publish/btc_positioning_{stamp}.jpg"); pre = big[:-4] + "_preview.jpg"

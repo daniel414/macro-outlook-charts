@@ -296,9 +296,9 @@ def main():
     legend(ax, [("OKX", TH["a"]), ("Gate", TH["b"]), (BN_LAB, BN_COL)]); add_price(ax, kl, w)
 
     # 3 / 4 top-trader long−short delta (bars = position, line = account)
-    for i, src, ttl, expl, srcl in ((2, "okx", "OKX 大戶多空差值", "看法：OKX 前 5% 保證金大戶。柱＝大戶多空單量差值；藍線＝多空大戶數差值，例 56%／44%＝+12%",
+    for i, src, ttl, expl, srcl in ((2, "okx", "OKX 大戶多空差值", "看法：OKX 持倉值前 5% 大戶。柱＝大戶持倉（看金額，多單減空單部位占比）；藍線＝大戶帳戶（看人數，做多減做空帳戶占比），例 56%／44%＝+12%",
                                      "來源：OKX rubik long-short-{position,account}-ratio-contract-top-trader (BTC-USDT-SWAP)"),
-                                    (3, "gate", "Binance / Gate 大戶多空差值", "看法：柱＝Gate 大戶持倉量差值（即時）、藍線＝Gate 大戶帳戶數差值（即時）；紫線＝Binance 大戶持倉差值",
+                                    (3, "gate", "Binance / Gate 大戶多空差值", "看法：柱＝Gate 大戶持倉（看金額）、藍線＝Gate 大戶帳戶（看人數）；紫線＝Binance 大戶持倉（保證金前 20%，看金額）",
                                      "來源：Gate.io contract_stats top_lsr_size / top_lsr_account（即時）、Binance futures/data topLongShortPositionRatio（備援 data.binance.vision）")):
         ax = axs[i]; tp, ta = lsdelta(S(src, "top_ls_position")), lsdelta(S(src, "top_ls_account"))
         deltabars(ax, tp, w, ta, TH["a"])

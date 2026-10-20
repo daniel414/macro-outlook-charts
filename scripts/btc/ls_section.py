@@ -24,11 +24,19 @@ for s, n in [("okx", "OKX"), ("gate", "Gate"), ("bitget", "Bitget")]:
 bn = c.execute("select ts,global_account,top_account,top_position from binance where global_account is not null order by ts desc limit 1").fetchone()
 bfresh = bool(bn) and now - bn[0] <= BN_FRESH   # live www.binance.com rows; older = fell back to daily dumps
 rows.append(("Binance" if bfresh or not bn else "Binance*", *(bn[1:] if bn else (None,) * 3)))
-L = ["【多空比】OKX/Gate/Bitget 1H、Binance 5m" + (f"，{T(t1h)}" if t1h else ""), "散戶（全體帳戶）"]
-for r in rows: L.append((p(r[0], 10) + f(r[1])).rstrip())
-L += ["", "大戶", (p("", 10) + p("帳戶", 18) + "持倉")]
-for r in rows: L.append((p(r[0], 10) + p(f(r[2]), 18) + f(r[3])).rstrip())
+L = ["【多空比】" + (T(t1h) if t1h else ""), "OKX/Gate/Bitget 1H、Binance 5m"]
+NM = {"OKX": "OKX　　", "Gate": "Gate　 ", "Bitget": "Bitget　", "Binance": "Binance ", "Binance*": "Binance*"}
+def blk(title, i, note=None):
+    out = ["", title] + ([note] if note else [])
+    for r in rows: out.append(NM.get(r[0], r[0] + " ") + f(r[i]))
+    return out
+L += blk("散戶（全體帳戶）", 1)
+L += blk("大戶帳戶（看人數）", 2, "・大戶中做多與做空的帳戶數比")
+L += blk("大戶持倉（看金額）", 3, "・大戶多單與空單的部位量比")
+L.append("")
 if not bn: L.append("*Binance 無資料")
-elif not bfresh: L.append(f"*Binance 截至 {T(bn[0])}（即時端點無法取得，改用官方每日檔）")
+elif not bfresh: L.append(f"*Binance 截至 {T(bn[0])}（改用官方每日檔）")
+L.append("大戶：Binance 保證金前 20%")
+L.append("OKX 持倉前 5%；Gate/Bitget 未公開")
 L.append(">1 偏多／<1 偏空")
 print("\n".join(L))
