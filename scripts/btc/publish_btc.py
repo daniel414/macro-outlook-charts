@@ -204,6 +204,18 @@ def add_structure(text):
         return (t[:i] + blk + t[i:] if i >= 0 else t + blk)[:4900]
     except Exception as e:
         print("structure skipped:", e, file=sys.stderr); return text
+def add_longshort(text):
+    """Insert 【多空比】 (ls_section.py, run as a script) right before 【未平倉量】 (i.e. after 【散戶 vs 大戶】).
+    Any existing 【多空比】 block is replaced, so it appears once. On failure the text is returned unchanged."""
+    try:
+        sec = subprocess.run([sys.executable, os.path.join(HERE, "ls_section.py")], cwd=HERE, capture_output=True, text=True, timeout=45).stdout.strip()
+        if not sec.startswith("【多空比】"): return text
+        t = re.sub(r"\n*" + re.escape(DIV) + r"\n【多空比】.*?(?=\n\n" + re.escape(DIV) + r"\n|\Z)", "", text, flags=re.S).rstrip()
+        i = t.find("\n\n" + DIV + "\n【未平倉量】")
+        if i < 0: return text
+        return (t[:i] + "\n\n" + DIV + "\n" + sec + t[i:])[:4900]
+    except Exception as e:
+        print("longshort skipped:", e, file=sys.stderr); return text
 def main():
     a = argparse.ArgumentParser(); a.add_argument("--image"); a.add_argument("--json"); a.add_argument("--text"); a.add_argument("--dry-run", action="store_true"); a.add_argument("--kol-only", action="store_true", help="only analyst image + btc/kol_latest.json"); a = a.parse_args()
     if a.kol_only:
@@ -226,7 +238,7 @@ def main():
     if a.text: text = open(a.text).read().strip()[:4900]
     elif j: text = summary(j, when)
     else: sys.exit("need --text or --json (or run without args)")
-    text = add_structure(text)
+    text = add_longshort(add_structure(text))
     stamp = when.strftime("%Y%m%d_%H%M")
     os.makedirs(os.path.join(HERE, "out/publish"), exist_ok=True)
     big = os.path.join(HERE, f"out/publish/btc_positioning_{stamp}.jpg"); pre = big[:-4] + "_preview.jpg"

@@ -84,9 +84,11 @@ def bootstrap():
     shutil.copy(os.path.join(HERE, "seed", "macro.db"), os.path.join(data, "macro.db"))                # FRED CBBTCUSD + blockchain.info (static history)
     import posdata as PD
     con = PD.db(); now = int(time.time()); fails = []
-    jobs = [("okx", lambda: okx_recent(con, {"4H": 2, "1D": 1})),
+    jobs = [("okx", lambda: okx_recent(con, {"1H": 1, "4H": 2, "1D": 1})),
             ("gate", lambda: PD.gate(con, True)),
             ("hyperliquid", lambda: PD.hyperliquid(con)),
+            ("hl_whales", lambda: PD.hl_whales(con)),     # 【多空比】 HL proxy
+            ("bitget", lambda: PD.bitget(con)),           # 【多空比】 Bitget 1H
             ("kraken", lambda: PD.kraken_daily(con)),
             ("binance", lambda: PD.binance(con, since=(datetime.now(ZoneInfo("UTC")).date() - timedelta(days=33)).isoformat())),
             ("bitfinex", lambda: PD.bitfinex(con, (now - 32 * 86400) * 1000))]
@@ -139,8 +141,9 @@ def summary(j, when, ai):
         L += sec(f"【Binance（延遲，截至 {P.bdate(g('binance_asof'))}）】",
                  f"・全部 {pct(g('binance_多空差值_全部'))}｜大戶持倉 {pct(g('binance_多空差值_大戶持倉'))}",
                  f"・巨鯨vs散戶 {f1(g('binance_巨鯨散戶差'),2)}")
-    # objective structure section (btc_structure.py via publish_btc.add_structure); omitted on any failure
-    return P.add_structure(P.EMOJI.sub("", "\n".join(L))[:4900])
+    # objective structure section (btc_structure.py via publish_btc.add_structure); omitted on any failure.
+    # 【多空比】 (ls_section.py via publish_btc.add_longshort) before 【未平倉量】; sources it could not fetch show 無資料.
+    return P.add_longshort(P.add_structure(P.EMOJI.sub("", "\n".join(L))[:4900]))
 
 
 def build_images(png, stamp):
