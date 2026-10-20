@@ -6,7 +6,10 @@
 
 Sources: OKX rubik (all-account L/S, top-trader account/position L/S, OI), Gate.io contract_stats (BTC_USDT; account
 L/S, top-trader account/size L/S, OI usd, funding; max 180d), Bitfinex stats1 pos.size long/short (1m -> stored as
-hourly last value, tf=1H), Hyperliquid metaAndAssetCtxs (BTC OI snapshot, tf=snap) + hl_whales PROXY (top-100 leaderboard addresses' BTC positions; HL has no L/S ratio API). Binance live API (451)/Bybit (403) blocked; Binance via data.binance.vision daily dumps (table binance, 1-2 day lag).
+hourly last value, tf=1H), Binance UM BTCUSDT 5m via www.binance.com/futures/data (live, ~30 days of history;
+fapi not used) + data.binance.vision daily dumps (backup / long history, 1-2 day lag), both into table binance
+(INSERT OR IGNORE + fill-NULL only: append-only, never overwrite). Bybit (403) blocked.
+Hyperliquid collection stopped 2026-10-20 (Daniel); its old rows (src=hyperliquid) and data/hl_top_addrs.json are kept.
 ts = bucket start, unix seconds UTC.
 """
 import argparse, json, sqlite3, sys, time, urllib.request
@@ -111,49 +114,6 @@ def bitfinex(con, since_ms=None):
     return n
 
 
-def hyperliquid(con):
-    a = get("https://api.hyperliquid.xyz/info", data=json.dumps({"type": "metaAndAssetCtxs"}).encode())
-    i = [u["name"] for u in a[0]["universe"]].index("BTC"); c = a[1][i]
-    t = int(time.time()) // 900 * 900
-    oi = float(c["openInterest"]); px = float(c["markPx"])
-    put(con, [("hyperliquid", "oi_btc", "snap", t, oi), ("hyperliquid", "oi_usd", "snap", t, oi * px),
-              ("hyperliquid", "funding_1h", "snap", t, float(c["funding"]))])
-    return 3
-
-
-HL_LB = "https://stats-data.hyperliquid.xyz/Mainnet/leaderboard"
-HL_TOPN = 100
-
-
-def hl_whales(con):
-    """PROXY (not an official ratio; Hyperliquid has no long/short-ratio API): BTC perp positions of the top-HL_TOPN
-    leaderboard addresses by accountValue (public clearinghouseState). Address list cached ~daily (leaderboard ~40MB).
-    Stores src=hyperliquid tf=snap: whale_long_btc, whale_short_btc, whale_ls_position (long/short size),
-    whale_long_n, whale_short_n, whale_ls_account (long/short count of addresses holding BTC)."""
-    cache = ROOT / "data" / "hl_top_addrs.json"
-    if not cache.exists() or time.time() - cache.stat().st_mtime > 86400:
-        r = get(HL_LB)["leaderboardRows"]
-        r.sort(key=lambda x: float(x["accountValue"]), reverse=True)
-        cache.write_text(json.dumps([x["ethAddress"] for x in r[:HL_TOPN]]))
-    addrs = json.loads(cache.read_text())
-    L = S = 0.0; nl = ns = 0
-    for a in addrs:
-        st = get("https://api.hyperliquid.xyz/info", data=json.dumps({"type": "clearinghouseState", "user": a}).encode())
-        for p in st.get("assetPositions", []):
-            q = p["position"]
-            if q["coin"] == "BTC":
-                z = float(q["szi"])
-                if z > 0: L += z; nl += 1
-                elif z < 0: S += -z; ns += 1
-        time.sleep(0.1)
-    t = int(time.time()) // 900 * 900
-    rows = [("hyperliquid", "whale_long_btc", "snap", t, L), ("hyperliquid", "whale_short_btc", "snap", t, S),
-            ("hyperliquid", "whale_long_n", "snap", t, nl), ("hyperliquid", "whale_short_n", "snap", t, ns)]
-    if S > 0: rows.append(("hyperliquid", "whale_ls_position", "snap", t, L / S))
-    if ns > 0: rows.append(("hyperliquid", "whale_ls_account", "snap", t, nl / ns))
-    put(con, rows); return len(rows)
-
-
 BG = "https://api.bitget.com/api/v2/mix/market/"
 
 
@@ -192,14 +152,65 @@ BCOLS = ["sum_open_interest", "sum_open_interest_value", "count_toptrader_long_s
          "sum_toptrader_long_short_ratio", "count_long_short_ratio", "sum_taker_long_short_vol_ratio"]
 
 
+BCOL_NAMES = ["oi_btc", "oi_usd", "top_account", "top_position", "global_account", "taker_ratio"]
+
+
+def bn_table(con):
+    con.execute("CREATE TABLE IF NOT EXISTS binance(ts INTEGER PRIMARY KEY, oi_btc REAL, oi_usd REAL, top_account REAL,"
+                " top_position REAL, global_account REAL, taker_ratio REAL)")
+    if "src" not in [r[1] for r in con.execute("PRAGMA table_info(binance)")]:
+        con.execute("ALTER TABLE binance ADD COLUMN src TEXT")   # NULL = old vision rows; 'www' / 'vision'
+
+
+def bn_put(con, rows, src):
+    """Append-only: new ts inserted; existing ts only gets its NULL columns filled (no value is overwritten)."""
+    q = "INSERT OR IGNORE INTO binance VALUES (?,?,?,?,?,?,?,?)"
+    before = con.total_changes
+    con.executemany(q, [(*r, src) for r in rows])
+    for c_i, c in enumerate(BCOL_NAMES):
+        con.executemany(f"UPDATE binance SET {c}=? WHERE ts=? AND {c} IS NULL", [(r[1 + c_i], r[0]) for r in rows if r[1 + c_i] is not None])
+    con.commit(); return con.total_changes - before
+
+
+BW = "https://www.binance.com/futures/data/"
+BW_EPS = {"globalLongShortAccountRatio": [("global_account", "longShortRatio")], "topLongShortAccountRatio": [("top_account", "longShortRatio")],
+          "topLongShortPositionRatio": [("top_position", "longShortRatio")], "takerlongshortRatio": [("taker_ratio", "buySellRatio")],
+          "openInterestHist": [("oi_btc", "sumOpenInterest"), ("oi_usd", "sumOpenInterestValue")]}
+
+
+def binance_www(con, backfill=False):
+    """Binance UM BTCUSDT 5m from public www.binance.com/futures/data endpoints (Binance keeps ~30 days).
+    Incremental: latest 500 rows (~41h) per endpoint; --backfill pages startTime/endTime back to the oldest available.
+    Raises on HTTP errors (451/403 included) so main() falls back to data.binance.vision and logs it."""
+    bn_table(con); rec = {}
+    for ep, cols in BW_EPS.items():
+        end = None
+        for pg in range(40 if backfill else 1):
+            try:
+                d = get(f"{BW}{ep}?symbol=BTCUSDT&period=5m&limit=500" + (f"&endTime={end}" if end else ""), tries=2)
+            except Exception:
+                if pg: break   # paged past Binance's ~30-day window (400 endTime invalid): keep what we have
+                raise
+            if not isinstance(d, list):
+                raise RuntimeError(f"{ep}: unexpected {str(d)[:120]}")
+            for r in d:
+                x = rec.setdefault(int(r["timestamp"]) // 1000, {})
+                for c, k in cols:
+                    if r.get(k) not in (None, ""): x[c] = float(r[k])
+            if len(d) < 500:
+                break
+            end = min(int(r["timestamp"]) for r in d) - 1; time.sleep(0.3)
+    rows = [(t, *[v.get(c) for c in BCOL_NAMES]) for t, v in sorted(rec.items())]
+    return bn_put(con, rows, "www")
+
+
 def binance(con, since="2024-01-01"):
     """Binance UM BTCUSDT 5m metrics from data.binance.vision (official public daily dumps, 1-2 day lag).
     Table binance(ts UTC sec, oi_btc, oi_usd, top_account, top_position, global_account, taker_ratio).
     Fetches every day after the latest stored one (or from `since`); missing (404) recent days are skipped quietly."""
     import io, csv, zipfile, datetime as dt, urllib.error
-    con.execute("CREATE TABLE IF NOT EXISTS binance(ts INTEGER PRIMARY KEY, oi_btc REAL, oi_usd REAL, top_account REAL,"
-                " top_position REAL, global_account REAL, taker_ratio REAL)")
-    mx = con.execute("SELECT MAX(ts) FROM binance").fetchone()[0]
+    bn_table(con)
+    mx = con.execute("SELECT MAX(ts) FROM binance WHERE src IS NULL OR src='vision'").fetchone()[0]
     d = dt.date.fromisoformat(since) if mx is None else dt.datetime.fromtimestamp(mx, dt.timezone.utc).date()
     today = dt.datetime.now(dt.timezone.utc).date(); n = 0
     while d < today:
@@ -216,7 +227,7 @@ def binance(con, since="2024-01-01"):
                 rows.append((ts, *[float(r[c]) if r.get(c) not in (None, "") else None for c in BCOLS]))
             except (KeyError, ValueError):
                 continue
-        con.executemany("INSERT OR REPLACE INTO binance VALUES (?,?,?,?,?,?,?)", rows); con.commit(); n += len(rows)
+        n += bn_put(con, rows, "vision")
         d += dt.timedelta(days=1); time.sleep(0.3)
     return n
 
@@ -226,7 +237,7 @@ def main():
     ap.add_argument("--bfx-since", default="2024-01-01"); ap.add_argument("--only")
     a = ap.parse_args(); con = db(); ok = True
     import datetime as dt
-    jobs = {"okx": lambda: okx(con, a.backfill), "gate": lambda: gate(con, a.backfill), "hyperliquid": lambda: hyperliquid(con), "hl_whales": lambda: hl_whales(con), "bitget": lambda: bitget(con), "deribit": lambda: deribit(con), "kraken": lambda: kraken_daily(con), "binance": lambda: binance(con),
+    jobs = {"okx": lambda: okx(con, a.backfill), "gate": lambda: gate(con, a.backfill), "bitget": lambda: bitget(con), "deribit": lambda: deribit(con), "kraken": lambda: kraken_daily(con), "binance_www": lambda: binance_www(con, a.backfill), "binance": lambda: binance(con),
             "bitfinex": lambda: bitfinex(con, int(dt.datetime.fromisoformat(a.bfx_since).replace(tzinfo=dt.timezone.utc).timestamp() * 1000) if a.backfill else None)}
     for k, f in jobs.items():
         if a.only and k not in a.only.split(","):
@@ -235,6 +246,8 @@ def main():
             print(f"[{time.strftime('%F %T')}] posdata {k}: {f()} rows", flush=True)
         except Exception as e:
             ok = False; print(f"[{time.strftime('%F %T')}] posdata {k} FAILED: {e!r}", flush=True)
+            if k == "binance_www":
+                print(f"[{time.strftime('%F %T')}] posdata binance_www FALLBACK: using data.binance.vision daily dumps only (1-2 day lag)", flush=True)
     sys.exit(0 if ok else 1)
 
 

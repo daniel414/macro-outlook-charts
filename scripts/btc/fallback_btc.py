@@ -86,16 +86,17 @@ def bootstrap():
     con = PD.db(); now = int(time.time()); fails = []
     jobs = [("okx", lambda: okx_recent(con, {"1H": 1, "4H": 2, "1D": 1})),
             ("gate", lambda: PD.gate(con, True)),
-            ("hyperliquid", lambda: PD.hyperliquid(con)),
-            ("hl_whales", lambda: PD.hl_whales(con)),     # 【多空比】 HL proxy
             ("bitget", lambda: PD.bitget(con)),           # 【多空比】 Bitget 1H
             ("kraken", lambda: PD.kraken_daily(con)),
+            ("binance_www", lambda: PD.binance_www(con, True)),   # live 5m, www.binance.com/futures/data (~30d); fapi not used
             ("binance", lambda: PD.binance(con, since=(datetime.now(ZoneInfo("UTC")).date() - timedelta(days=33)).isoformat())),
             ("bitfinex", lambda: PD.bitfinex(con, (now - 32 * 86400) * 1000))]
     for k, f in jobs:
         t = time.time()
         try: log(f"bootstrap {k}: {f()} rows in {time.time()-t:.1f}s")
-        except Exception as e: fails.append(k); log(f"bootstrap {k} FAILED: {e!r}")
+        except Exception as e:
+            fails.append(k); log(f"bootstrap {k} FAILED: {e!r}")
+            if k == "binance_www": log("bootstrap binance_www FALLBACK: using data.binance.vision daily dumps only (1-2 day lag); /btc shows 截至")
     from btcsent import positioning as BP, common as BC
     t = time.time()
     try: log(f"bootstrap okx funding/positioning: {BP.update(BC.connect())} rows in {time.time()-t:.1f}s")
@@ -130,20 +131,17 @@ def summary(j, when, ai):
            f"・大戶帳戶：OKX {pct(g('多空差值_okx_大戶帳戶'))}｜Gate {pct(g('多空差值_gate_大戶帳戶'))}", whale]
     if ai.get("解讀"): blk += ["", ai["解讀"]]
     L += sec(*blk)
-    L += sec("【未平倉量】", "・" + "｜".join([f"OKX {busd(g('未平倉_okx_usd'))}", f"Gate {busd(g('未平倉_gate_usd'))}", f"HL {busd(g('未平倉_hyperliquid_usd'))}"]))
-    L += sec("【資金費率】", f"・每 8h：OKX {pct(g('資金費率_okx_8h_pct'),4)}｜Gate {pct(g('資金費率_gate_pct'),4)}",
-             f"・每 1h：HL {pct(g('資金費率_hyperliquid_1h_pct'),4)}")
+    L += sec("【未平倉量】", "・" + "｜".join([f"OKX {busd(g('未平倉_okx_usd'))}", f"Gate {busd(g('未平倉_gate_usd'))}"]))
+    L += sec("【資金費率】", f"・每 8h：OKX {pct(g('資金費率_okx_8h_pct'),4)}｜Gate {pct(g('資金費率_gate_pct'),4)}")
     L += sec("【Bitfinex 槓桿】", f"・{pct(g('多空差值_bitfinex_pct'),2)}｜多 {g('bitfinex_多_btc') or 0:,.0f}／空 {g('bitfinex_空_btc') or 0:,.0f} BTC")
     ah = g("ahr999")
     zone = "" if ah is None else ("｜抄底區（<0.45）" if ah < 0.45 else "｜定投區（0.45–1.2）" if ah <= 1.2 else "｜高於定投線（>1.2）")
     L += sec("【Ahr999】", f"・{f1(ah,2,False)}{zone}")
-    if g("binance_多空差值_大戶持倉") is not None:
-        L += sec(f"【Binance（延遲，截至 {P.bdate(g('binance_asof'))}）】",
-                 f"・全部 {pct(g('binance_多空差值_全部'))}｜大戶持倉 {pct(g('binance_多空差值_大戶持倉'))}",
-                 f"・巨鯨vs散戶 {f1(g('binance_巨鯨散戶差'),2)}")
+    # 【Binance】 is appended last by publish_btc.add_binance (live www rows -> 【Binance】; daily-dump fallback -> 【Binance（截至 …）】).
     # objective structure section (btc_structure.py via publish_btc.add_structure); omitted on any failure.
     # 【多空比】 (ls_section.py via publish_btc.add_longshort) before 【未平倉量】; sources it could not fetch show 無資料.
-    return P.add_longshort(P.add_structure(P.EMOJI.sub("", "\n".join(L))[:4900]))
+    # Hyperliquid removed 2026-10-20 (Daniel): strip_hl also cleans carried-over AI sentences.
+    return P.strip_hl(P.add_binance(P.add_longshort(P.add_structure(P.EMOJI.sub("", "\n".join(L))[:4900]))))
 
 
 def build_images(png, stamp):
@@ -202,6 +200,8 @@ def main():
     ai_ok = bool(ai_from) and (datetime.now(TZ) - parse_tp(ai_from)) < timedelta(hours=AI_CARRY_H)
     ai = ai_lines(cur.get("summary_text")) if ai_ok else {}
     lead = (cur.get("lead_text") or "") if ai_ok else ""
+    if lead:
+        import publish_btc as P; lead = P.strip_hl(lead)
     text = summary(j, when, ai)
     big, pre = build_images(png, stamp)
     log("built", big, os.path.getsize(big), pre, os.path.getsize(pre), "ai_carry", ai_ok, sorted(ai))

@@ -4,12 +4,12 @@
   python positioning_grid.py                 # 4H, 180 bars, ~3840 px wide; prints PNG path + POSGRID_JSON line
   python positioning_grid.py --tf 1H --bars 180 --out x.png
 
-Panels (BTC price on each; L/S ratios shown as long−short deltas in %, Daniel 2026-10-14): 1 多空差值（全部帳戶）OKX+Gate · 2 未平倉量 OKX+Gate (+Hyperliquid snapshot) ·
-3 OKX 大戶多空比 (account/position) · 4 Gate 大戶多空比 (Binance substitute; Binance 451) · 5 巨鯨 vs 散戶差值 ·
+Panels (BTC price on each; L/S ratios shown as long−short deltas in %, Daniel 2026-10-14): 1 多空差值（全部帳戶）OKX+Gate · 2 未平倉量 OKX+Gate ·
+3 OKX 大戶多空比 (account/position) · 4 Gate/Binance 大戶多空比 · 5 巨鯨 vs 散戶差值 ·
 6 Bitfinex 槓桿多空 · 7 Ahr999 (daily, computed from FRED CBBTCUSD + Kraken) · 8 資金費率.
 Data: data/positioning2.db (posdata.py, run every 15 min by run_collect.sh); OKX funding from sentiment.db.
 Freshness (2026-10-17, after the dead collector left OKX funding 46h stale): every run refreshes OKX realized funding live
-(btcsent.positioning.update, 1 page, OKX public funding-rate-history); OI/funding series older than their bar + 2h (HL snapshot 2h,
+(btcsent.positioning.update, 1 page, OKX public funding-rate-history); OI/funding series older than their bar + 2h (
 OKX 8h funding 9h) trigger a live posdata refetch, and anything still stale is output as None, listed in POSGRID_JSON
 "stale" (old value + as-of) and in "fails", so it is never shown as current. "asof" gives each funding/OI timestamp.
 Descriptive only, no zones, no circles.
@@ -85,7 +85,7 @@ def freshen(tf, fails):
     except Exception as e:
         fails.append(f"okx_funding_refresh: {e!r}")
     now = time.time(); con = sqlite3.connect(PDB, timeout=60)
-    checks = {"okx": [("oi_usd", tf)], "gate": [("oi_usd", tf), ("funding", tf)], "hyperliquid": [("oi_usd", "snap"), ("funding_1h", "snap")]}
+    checks = {"okx": [("oi_usd", tf)], "gate": [("oi_usd", tf), ("funding", tf)]}
     need = [src for src, ms in checks.items()
             if any(now - _maxts(con, src, m, t) > (SNAP_MAX if t == "snap" else tf_max(t)) for m, t in ms)]
     con.close()
@@ -95,7 +95,7 @@ def freshen(tf, fails):
             pc = PD.db()
             for src in need:
                 try:
-                    {"okx": lambda: PD.okx(pc, False), "gate": lambda: PD.gate(pc, False), "hyperliquid": lambda: PD.hyperliquid(pc)}[src]()
+                    {"okx": lambda: PD.okx(pc, False), "gate": lambda: PD.gate(pc, False)}[src]()
                 except Exception as e:
                     fails.append(f"{src}_refetch: {e!r}")
             pc.close()
@@ -219,7 +219,7 @@ def binance_tf(con, step, start, end):
     out = df.groupby("b").last(); out.attrs["last_ts"] = int(df.ts.iloc[-1]); return out
 
 
-BN_COL = "#c77dff"; BN_LAB = "Binance（延遲 1–2 天）"
+BN_COL = "#c77dff"; BN_LAB = "Binance"
 
 
 def bn_mark(ax, s, w, col=BN_COL):
@@ -249,10 +249,12 @@ def main():
     kl, exch = get_klines(a.tf.lower(), int(start_b), int(end_b)); kl = kl[(kl.index >= start_b) & (kl.index < end_b)]
     fails, cur = [], {}
     freshen(a.tf, fails)
-    global BN_LAST
+    global BN_LAST, BN_LAB
     bn = binance_tf(con, step, start_b, end_b)
     if not bn.empty:
         BN_LAST = bn.attrs["last_ts"]
+        # live www.binance.com rows are <=2h old; older = daily-dump fallback, show as-of time
+        BN_LAB = "Binance" if now - BN_LAST <= 2 * 3600 else f"Binance（截至 {datetime.fromtimestamp(BN_LAST, TZ):%m/%d %H:%M}）"
     else:
         fails.append("binance: no data in window")
     BS = lambda c: bn[c].dropna() if not bn.empty else pd.Series(dtype=float)
@@ -279,7 +281,7 @@ def main():
     vo, vg = last(o)[0], last(g)[0]; cur["多空差值_全部_okx"], cur["多空差值_全部_gate"] = vo, vg
     head(ax, "多空差值（全部帳戶）", f"OKX {vo:+.1f}% · Gate {vg:+.1f}%" if vo is not None and vg is not None else "資料不足",
          "看法：例 56% 做多／44% 做空＝+12%。綠＝較多人做多；帳戶多的一方通常是散戶",
-         "來源：OKX rubik long-short-account-ratio-contract（柱）、Gate.io lsr_account（青線）、data.binance.vision count_long_short_ratio（紫線）")
+         "來源：OKX rubik long-short-account-ratio-contract（柱）、Gate.io lsr_account（青線）、Binance futures/data globalLongShortAccountRatio（紫線，備援 data.binance.vision）")
     legend(ax, [("OKX（柱）", TH["up"]), ("Gate", TH["b"]), (BN_LAB, BN_COL)]); add_price(ax, kl, w)
 
     # 2 OI
@@ -287,19 +289,17 @@ def main():
     stepline(ax, o / 1e9, w, TH["a"], fill=True); stepline(ax, g / 1e9, w, TH["b"])
     bo = BS("oi_usd"); stepline(ax, bo / 1e9, w, BN_COL, lw=1.4); bn_mark(ax, bo / 1e9, w)
     ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _=None: f"${v:.1f}B"))
-    hl = series(con, "hyperliquid", "oi_usd", "snap"); vh = last(hl)[0]
-    vh = fresh("未平倉_hyperliquid_usd", hl, SNAP_MAX)
-    vo, vg = fresh("未平倉_okx_usd", o, tf_max(a.tf)), fresh("未平倉_gate_usd", g, tf_max(a.tf)); cur.update({"未平倉_okx_usd": vo, "未平倉_gate_usd": vg, "未平倉_hyperliquid_usd": vh})
+    vo, vg = fresh("未平倉_okx_usd", o, tf_max(a.tf)), fresh("未平倉_gate_usd", g, tf_max(a.tf)); cur.update({"未平倉_okx_usd": vo, "未平倉_gate_usd": vg})
     chg = (o.iloc[-1] / o.iloc[-7] - 1) * 100 if len(o) > 7 else float("nan")
-    head(ax, "未平倉量", (f"OKX ${vo/1e9:.2f}B ({chg:+.1f}%/6根) · Gate ${vg/1e9:.2f}B" if vo and vg else "資料不足") + (f" · Hyperliquid ${vh/1e9:.2f}B" if vh else ""),
-         "看法：未平倉合約總值。價漲＋OI 增＝新資金追多；價跌＋OI 增＝加空；OI 急降＝平倉或爆倉", "來源：OKX open-interest-history、Gate.io contract_stats、data.binance.vision sum_open_interest_value、Hyperliquid（僅即時快照）")
+    head(ax, "未平倉量", (f"OKX \\${vo/1e9:.2f}B ({chg:+.1f}%/6根) · Gate \\${vg/1e9:.2f}B" if vo and vg else "資料不足"),
+         "看法：未平倉合約總值。價漲＋OI 增＝新資金追多；價跌＋OI 增＝加空；OI 急降＝平倉或爆倉", "來源：OKX open-interest-history、Gate.io contract_stats、Binance futures/data openInterestHist（備援 data.binance.vision）")
     legend(ax, [("OKX", TH["a"]), ("Gate", TH["b"]), (BN_LAB, BN_COL)]); add_price(ax, kl, w)
 
     # 3 / 4 top-trader long−short delta (bars = position, line = account)
     for i, src, ttl, expl, srcl in ((2, "okx", "OKX 大戶多空差值", "看法：OKX 前 5% 保證金大戶。柱＝大戶多空單量差值；藍線＝多空大戶數差值，例 56%／44%＝+12%",
                                      "來源：OKX rubik long-short-{position,account}-ratio-contract-top-trader (BTC-USDT-SWAP)"),
-                                    (3, "gate", "Binance / Gate 大戶多空差值", "看法：柱＝Gate 大戶持倉量差值（即時）、藍線＝Gate 大戶帳戶數差值（即時）；紫線＝Binance 大戶持倉差值（延遲 1–2 天）",
-                                     "來源：Gate.io contract_stats top_lsr_size / top_lsr_account（即時）、data.binance.vision sum_toptrader_long_short_ratio（官方每日檔）")):
+                                    (3, "gate", "Binance / Gate 大戶多空差值", "看法：柱＝Gate 大戶持倉量差值（即時）、藍線＝Gate 大戶帳戶數差值（即時）；紫線＝Binance 大戶持倉差值",
+                                     "來源：Gate.io contract_stats top_lsr_size / top_lsr_account（即時）、Binance futures/data topLongShortPositionRatio（備援 data.binance.vision）")):
         ax = axs[i]; tp, ta = lsdelta(S(src, "top_ls_position")), lsdelta(S(src, "top_ls_account"))
         deltabars(ax, tp, w, ta, TH["a"])
         vp, va = last(tp)[0], last(ta)[0]; cur[f"多空差值_{src}_大戶持倉"], cur[f"多空差值_{src}_大戶帳戶"] = vp, va
@@ -332,7 +332,7 @@ def main():
             fails.append(f"whale daily: {e!r}")
         head(ax, "巨鯨 vs 散戶差值", f"OKX {vw:+.3f} · {tw}" if vw is not None else "資料不足",
              "看法：大戶持倉多空比 − 全部帳戶多空比。綠＝大戶比散戶偏多；紅＝散戶比大戶偏多。紫線＝Binance（Coinglass 同定義）",
-             "來源：OKX rubik top-trader position ratio − account ratio（柱）、data.binance.vision sum_toptrader − count_long_short_ratio（紫線）")
+             "來源：OKX rubik top-trader position ratio − account ratio（柱）、Binance topLongShortPositionRatio − globalLongShortAccountRatio（紫線）")
         legend(ax, [("OKX 差值（柱）", TH["up"]), (BN_LAB, BN_COL)]); add_price(ax, kl, w)
     except Exception as e:
         fails.append(f"whale delta: {e!r}"); head(ax, "巨鯨 vs 散戶差值", "繪製失敗", "", "")
@@ -404,10 +404,9 @@ def main():
         ax.bar(num(fo.index), fo.values, width=8 / 24 * 0.8, align="edge", color=np.where(fo.values >= 0, TH["up"], TH["down"]), alpha=0.85, lw=0)
     stepline(ax, fg, w, TH["b"], lw=1.3)
     ax.axhline(0, color=TH["muted"], lw=0.7); ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _=None: f"{v:.3f}%"))
-    hf = fresh("資金費率_hyperliquid_1h_pct", series(con, "hyperliquid", "funding_1h", "snap"), SNAP_MAX)
-    vo, vg = fresh("資金費率_okx_8h_pct", fo, FUND_OKX_MAX), fresh("資金費率_gate_pct", fg, tf_max(a.tf)); cur.update({"資金費率_okx_8h_pct": vo, "資金費率_gate_pct": vg, "資金費率_hyperliquid_1h_pct": hf * 100 if hf is not None else None})
-    head(ax, "資金費率", (f"OKX {vo:+.4f}%/8h" if vo is not None else "OKX —") + (f" · Gate {vg:+.4f}%" if vg is not None else "") + (f" · HL {hf*100:+.4f}%/1h" if hf is not None else ""),
-         "看法：正（綠）＝多方付錢給空方，多單擁擠；負（紅）＝空方付錢，空單擁擠", "來源：OKX 已結算資金費率（柱）、Gate.io last_funding_rate（青線）、Hyperliquid 即時")
+    vo, vg = fresh("資金費率_okx_8h_pct", fo, FUND_OKX_MAX), fresh("資金費率_gate_pct", fg, tf_max(a.tf)); cur.update({"資金費率_okx_8h_pct": vo, "資金費率_gate_pct": vg})
+    head(ax, "資金費率", (f"OKX {vo:+.4f}%/8h" if vo is not None else "OKX —") + (f" · Gate {vg:+.4f}%" if vg is not None else ""),
+         "看法：正（綠）＝多方付錢給空方，多單擁擠；負（紅）＝空方付錢，空單擁擠", "來源：OKX 已結算資金費率（柱）、Gate.io last_funding_rate（青線）")
     legend(ax, [("OKX", TH["up"]), ("Gate", TH["b"])]); add_price(ax, kl, w)
 
     for i, ax in enumerate(axs):

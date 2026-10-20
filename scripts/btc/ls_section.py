@@ -5,6 +5,7 @@ import os, sqlite3, time, unicodedata as u
 from datetime import datetime
 HERE = os.path.dirname(os.path.abspath(__file__))
 MAXAGE = 3 * 3600
+BN_FRESH = 2 * 3600
 c = sqlite3.connect(f"file:{os.path.join(HERE, 'data/positioning2.db')}?mode=ro", uri=True, timeout=20)
 now = time.time()
 def g(src, m, tf):
@@ -20,20 +21,14 @@ for s, n in [("okx", "OKX"), ("gate", "Gate"), ("bitget", "Bitget")]:
     for x in v:
         if x: t1h = max(t1h or 0, x[0])
     rows.append((n, *[x[1] if x else None for x in v]))
-bn = c.execute("select ts,global_account,top_account,top_position from binance order by ts desc limit 1").fetchone()
-rows.append(("Binance*", *(bn[1:] if bn else (None,) * 3)))
-ha, hp = g("hyperliquid", "whale_ls_account", "snap"), g("hyperliquid", "whale_ls_position", "snap")
-rows.append(("HL**", None, ha[1] if ha else None, hp[1] if hp else None))
-L = ["【多空比】OKX/Gate/Bitget 1H" + (f"，{T(t1h)}" if t1h else ""), "散戶（全體帳戶）"]
+bn = c.execute("select ts,global_account,top_account,top_position from binance where global_account is not null order by ts desc limit 1").fetchone()
+bfresh = bool(bn) and now - bn[0] <= BN_FRESH   # live www.binance.com rows; older = fell back to daily dumps
+rows.append(("Binance" if bfresh or not bn else "Binance*", *(bn[1:] if bn else (None,) * 3)))
+L = ["【多空比】OKX/Gate/Bitget 1H、Binance 5m" + (f"，{T(t1h)}" if t1h else ""), "散戶（全體帳戶）"]
 for r in rows: L.append((p(r[0], 10) + f(r[1])).rstrip())
 L += ["", "大戶", (p("", 10) + p("帳戶", 18) + "持倉")]
 for r in rows: L.append((p(r[0], 10) + p(f(r[2]), 18) + f(r[3])).rstrip())
-L.append(f"*Binance 延遲，截至 {T(bn[0])}" if bn else "*Binance 無資料")
-hn, hl, hs = g("hyperliquid", "whale_short_n", "snap"), g("hyperliquid", "whale_long_n", "snap"), g("hyperliquid", "whale_short_btc", "snap")
-hlb = g("hyperliquid", "whale_long_btc", "snap")
-if hn and hl and hs and hlb:
-    L.append(f"**HL 無官方多空比，以淨值前 100 大地址倉位替代（{int(hl[1]+hn[1])} 個有 BTC 倉位：多 {hlb[1]:,.0f}／空 {hs[1]:,.0f} BTC）")
-else:
-    L.append("**HL 無官方多空比，以淨值前 100 大地址倉位替代")
+if not bn: L.append("*Binance 無資料")
+elif not bfresh: L.append(f"*Binance 截至 {T(bn[0])}（即時端點無法取得，改用官方每日檔）")
 L.append(">1 偏多／<1 偏空")
 print("\n".join(L))

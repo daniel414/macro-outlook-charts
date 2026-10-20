@@ -78,7 +78,7 @@ LEAD_FILE = os.path.join(HERE, "out/lead_text.txt")
 def lead_text():
     try:
         if time.time() - os.path.getmtime(LEAD_FILE) > 3 * 3600: return ""  # stale: skip
-        return EMOJI.sub("", open(LEAD_FILE).read()).strip()[:4900]
+        return strip_hl(EMOJI.sub("", open(LEAD_FILE).read()).strip())[:4900]
     except Exception:
         return ""
 def change_section(sec):
@@ -157,17 +157,16 @@ def summary(j, when):
     def oi(name, k):
         c = g(k.replace("_usd", "_24h_pct"))
         return f"{name} {busd(g(k))}" + (f" ({pct(c)} 24h)" if c is not None else "")
-    L += sec("【未平倉量】", "・" + "｜".join([oi("OKX", "未平倉_okx_usd"), oi("Gate", "未平倉_gate_usd"), oi("HL", "未平倉_hyperliquid_usd")]))
+    L += sec("【未平倉量】", "・" + "｜".join([oi("OKX", "未平倉_okx_usd"), oi("Gate", "未平倉_gate_usd")]))
     L += sec("【資金費率】",
-             f"・每 8h：OKX {pct(g('資金費率_okx_8h_pct'),4)}｜Gate {pct(g('資金費率_gate_pct'),4)}",
-             f"・每 1h：HL {pct(g('資金費率_hyperliquid_1h_pct'),4)}")
+             f"・每 8h：OKX {pct(g('資金費率_okx_8h_pct'),4)}｜Gate {pct(g('資金費率_gate_pct'),4)}")
     L += sec("【Bitfinex 槓桿】",
              f"・{pct(g('多空差值_bitfinex_pct'),2)}｜多 {g('bitfinex_多_btc') or 0:,.0f}／空 {g('bitfinex_空_btc') or 0:,.0f} BTC")
     ah = g('ahr999')
     zone = "" if ah is None else ("｜抄底區（<0.45）" if ah < 0.45 else "｜定投區（0.45–1.2）" if ah <= 1.2 else "｜高於定投線（>1.2）")
     L += sec("【Ahr999】", f"・{f1(ah,2,False)}{zone}")
     if g("binance_多空差值_大戶持倉") is not None:
-        L += sec(f"【Binance（延遲，截至 {bdate(g('binance_asof'))}）】",
+        L += sec("【Binance】",
                  f"・全部 {pct(g('binance_多空差值_全部'))}｜大戶持倉 {pct(g('binance_多空差值_大戶持倉'))}",
                  f"・巨鯨vs散戶 {f1(g('binance_巨鯨散戶差'),2)}")
     t = EMOJI.sub("", "\n".join(L))[:4900]
@@ -204,6 +203,33 @@ def add_structure(text):
         return (t[:i] + blk + t[i:] if i >= 0 else t + blk)[:4900]
     except Exception as e:
         print("structure skipped:", e, file=sys.stderr); return text
+BN_FRESH = 2 * 3600
+def bn_latest():
+    import sqlite3
+    try:
+        c = sqlite3.connect(f"file:{os.path.join(HERE, 'data/positioning2.db')}?mode=ro", uri=True, timeout=20)
+        r = c.execute("select ts,global_account,top_position from binance where global_account is not null and top_position is not null order by ts desc limit 1").fetchone(); c.close()
+        return r
+    except Exception:
+        return None
+def bn_header(r=None):
+    """【Binance】 when the newest binance row is live (www.binance.com, <=2h old); else 【Binance（截至 MM/DD HH:MM）】 (daily-dump fallback)."""
+    r = r or bn_latest(); ts = r[0] if r else None
+    if ts and time.time() - ts <= BN_FRESH: return "【Binance】"
+    return f"【Binance（截至 {datetime.fromtimestamp(ts).strftime('%m/%d %H:%M')}）】" if ts else "【Binance】"
+def add_binance(text):
+    """Rebuild the 【Binance…】 block from positioning2.db (same formulas as positioning_grid.py), so title and numbers match."""
+    r = bn_latest()
+    if not r: return text
+    d = lambda x: (x - 1) / (x + 1) * 100
+    blk = [bn_header(r), f"・全部 {pct(d(r[1]))}｜大戶持倉 {pct(d(r[2]))}", f"・巨鯨vs散戶 {f1(r[2] - r[1], 2)}"]
+    t = re.sub(r"\n*" + re.escape(DIV) + r"\n【Binance[^\n]*】.*?(?=\n\n" + re.escape(DIV) + r"\n|\Z)", "", text, flags=re.S).rstrip()
+    return (t + "\n\n" + DIV + "\n" + "\n".join(blk))[:4900]   # last section, after 【技術結構】
+def strip_hl(text):
+    """Hyperliquid removed 2026-10-20 (Daniel): drop HL from any supplied text (OI item, 1h funding line)."""
+    t = re.sub(r"｜HL \$[^｜\n]*", "", text)
+    t = re.sub(r"\n・每 1h：HL [^\n]*", "", t)
+    return re.sub(r"\n[^\n]*(?:Hyperliquid|HL\*\*)[^\n]*", "", t)
 def add_longshort(text):
     """Insert 【多空比】 (ls_section.py, run as a script) right before 【未平倉量】 (i.e. after 【散戶 vs 大戶】).
     Any existing 【多空比】 block is replaced, so it appears once. On failure the text is returned unchanged."""
@@ -238,7 +264,7 @@ def main():
     if a.text: text = open(a.text).read().strip()[:4900]
     elif j: text = summary(j, when)
     else: sys.exit("need --text or --json (or run without args)")
-    text = add_longshort(add_structure(text))
+    text = strip_hl(add_binance(add_longshort(add_structure(text))))
     stamp = when.strftime("%Y%m%d_%H%M")
     os.makedirs(os.path.join(HERE, "out/publish"), exist_ok=True)
     big = os.path.join(HERE, f"out/publish/btc_positioning_{stamp}.jpg"); pre = big[:-4] + "_preview.jpg"
