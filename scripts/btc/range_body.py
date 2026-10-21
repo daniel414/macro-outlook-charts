@@ -56,7 +56,7 @@ def line():
     e=current(bitstamp())
     if not e: return ''
     m=dt.datetime.utcfromtimestamp(e['mother'])
-    return f"盤整區 {round(e['lo']):,}～{round(e['hi']):,} 已 {e['days']} 天（母K {m.month}/{m.day}），以日收盤突破判方向；歷史同類 5～6 次，突破後 30 天順勢僅 2 次、假突破 2～4 次，樣本少僅供參考"
+    return f"盤整區 {round(e['lo']):,}～{round(e['hi']):,} 已 {e['days']} 天（母K {m.month}/{m.day}），以日收盤突破判方向；歷史同類 6 次，突破後 60～90 天順勢 5 次，但短線常假突破，樣本少僅供參考"
 def check_breakout(state_path='out/range_state.json',minN=21):
     import os
     st=json.load(open(state_path)) if os.path.exists(state_path) else {}
