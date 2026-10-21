@@ -203,6 +203,18 @@ def add_structure(text):
         return (t[:i] + blk + t[i:] if i >= 0 else t + blk)[:4900]
     except Exception as e:
         print("structure skipped:", e, file=sys.stderr); return text
+def add_range(text):
+    """Append the range_body.py (run as a script) consolidation line inside 【技術結構】, once. Unchanged on failure / no active range."""
+    try:
+        ln = subprocess.run([os.path.join(HERE, ".venv/bin/python"), os.path.join(HERE, "range_body.py"), "--line"], cwd=HERE, capture_output=True, text=True, timeout=60).stdout.strip()
+        if not ln.startswith("盤整區 ") or "\n" in ln: return text
+        t = re.sub(r"\n・盤整區 [^\n]*", "", text)
+        m = re.search(r"【技術結構】\n(?:・[^\n]*(?:\n|$))*", t)
+        if not m: return text
+        blk = m.group(0).rstrip("\n")
+        return (t[:m.start()] + blk + "\n・" + ln + t[m.start() + len(blk):])[:4900]
+    except Exception as e:
+        print("range skipped:", e, file=sys.stderr); return text
 BN_FRESH = 2 * 3600
 def bn_latest():
     import sqlite3
@@ -299,7 +311,7 @@ def main():
     if a.text: text = open(a.text).read().strip()[:4900]
     elif j: text = summary(j, when)
     else: sys.exit("need --text or --json (or run without args)")
-    text = add_notes(strip_hl(add_binance(add_longshort(add_rvw(add_structure(text))))))
+    text = add_notes(strip_hl(add_binance(add_longshort(add_rvw(add_range(add_structure(text)))))))
     stamp = when.strftime("%Y%m%d_%H%M")
     os.makedirs(os.path.join(HERE, "out/publish"), exist_ok=True)
     big = os.path.join(HERE, f"out/publish/btc_positioning_{stamp}.jpg"); pre = big[:-4] + "_preview.jpg"
