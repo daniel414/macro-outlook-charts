@@ -113,7 +113,7 @@ def text(A):
     elif v["LTHz"] < 0 or v["AVIV"] < 0.1: regime = "熊市後段的修復期，最接近 2019 年第一季和 2023 年第一季"
     else: regime = "底部後的新上升段初期"
     L = [f"BTC 鏈上週期分析（CheckOnChain）", f"{datetime.now().strftime('%Y.%m.%d %H:%M')} (UTC+8)｜BTC {n0(p)}", "",
-         f"從 CheckOnChain 數據看，現在比較像{regime}。", SEP, "【週期時間】",
+         f"從 CheckOnChain 數據看，目前週期位置：{regime}。", SEP, "【週期時間】",
          f"・前高是 {ymd(c['top'])} 的 {n0(c['topP'])}，到今天 {c['days']} 天。過去三輪的底都落在前高後 {min(x['days'] for x in past)}–{max(x['days'] for x in past)} 天：" +
          "、".join(f"{ymd(x['bot'])} 跌 {x['dd']*100:.0f}%" for x in past) + "。",
          f"・這輪低點是 {ymd(c['low'])} 的 {n0(c['lowP'])}，在前高後 {c['lowdays']} 天，跌幅 {c['dd']*100:.0f}%。", SEP, "【底部深度比較】",
@@ -129,20 +129,19 @@ def text(A):
     m0 = t.month; q1 = m0 + 3 if m0 + 3 <= 12 else m0 + 3 - 12
     rng_lo, rng_hi = min(sup_lo, v["BBcool"] * 1.1), v["BBhot"]
     sp_d, sp_v = A["sth_peak"]
-    L += [SEP, "【走勢推估】",
-          f"・{months(m0, 3)}：偏區間震盪，大致在 {k(rng_lo)}–{k(rng_hi)}。STH MVRV {md(sp_d)} 到 {sp_v:.3f} 後{'回落' if v['STHMVRV'] < sp_v - 0.005 else '維持高檔'}，LTH SOPR 近 60 天高點 {A['sopr_max']:.2f}、目前 {v['LTHSOPR']:.2f}。"
-          f"下方 {k(sup_lo)}（{'STH 成本' if sup_lo == v['STHRP'] else 'True Market Mean'}）到 {k(sup_hi)}（{'True Market Mean' if sup_hi == v['TMM'] else 'STH 成本'}）是關鍵支撐帶；上方先看 {k(v['BBheat'])}，再看 {k(v['BBhot'])}（STH 布林帶過熱線）。",
-          f"・{months(q1, 3)}：照 2019 和 2023 的節奏，底部後通常是守住成本線再往上突破。如果價格一直守在 {k(sup_hi)} 之上，LTH MVRV Z 回到 0 以上、AVIV 持續為正，就比較可能進入新的上升段。",
-          f"・反過來，日線跌破 {k(sup_lo)} 再跌破 {k(v['BBcool'])}（STH 布林帶冷卻線），就可能回測 {k(c['lowP'])}–{k(v['BBover'])}（前低和超賣線）。歷史上真正深熊的底都在 LTH 成本附近，目前是 {k(v['LTHRP'])}。"]
+    L += [SEP, "【目前位置】",
+          f"・STH MVRV {md(sp_d)} 到 {sp_v:.3f} 後{'回落' if v['STHMVRV'] < sp_v - 0.005 else '維持高檔'}，目前 {v['STHMVRV']:.3f}；LTH SOPR 近 60 天高點 {A['sopr_max']:.2f}、目前 {v['LTHSOPR']:.2f}。",
+          f"・價格 {k(p)}，" + ("在" if p >= sup_hi else "低於" if p < sup_lo else "介於") + f" STH 成本 {k(v['STHRP'])} 與 True Market Mean {k(v['TMM'])} " + ("之上" if p >= sup_hi else "之下" if p < sup_lo else "之間") + f"；距 STH 布林帶偏熱線 {k(v['BBheat'])} {(p / v['BBheat'] - 1) * 100:+.1f}%、過熱線 {k(v['BBhot'])} {(p / v['BBhot'] - 1) * 100:+.1f}%。",
+          f"・距 STH 布林帶冷卻線 {k(v['BBcool'])} {(p / v['BBcool'] - 1) * 100:+.1f}%、週期低點 {k(c['lowP'])} {(p / c['lowP'] - 1) * 100:+.1f}%、LTH 成本 {k(v['LTHRP'])} {(p / v['LTHRP'] - 1) * 100:+.1f}%。"]
     bb = "過熱" if v["BBosc"] > 1 else "超賣" if v["BBosc"] < -1 else ("中性偏上" if v["BBosc"] > 0 else "中性偏下")
     nz = "興奮／貪婪" if v["NUPL"] > 0.75 else "信念／否認" if v["NUPL"] > 0.5 else "樂觀／焦慮" if v["NUPL"] > 0.25 else "希望／恐懼" if v["NUPL"] > 0 else "投降"
     nz = "希望／恐懼" if 0 < v["NUPL"] <= 0.5 and v["NUPL"] < 0.5 else nz
     L += [SEP, f"【指標一覽（資料日 {md(t)}）】",
           f"・STH MVRV 布林帶｜{v['STHMVRV']:.3f}，振盪器 {v['BBosc']:+.2f}，{bb}。",
-          f"・LTH SOPR｜{v['LTHSOPR']:.2f}，" + ("長期持有者仍有獲利但已接近 1。" if v["LTHSOPR"] < 1.1 and v["LTHSOPR"] >= 1 else "長期持有者獲利了結明顯。" if v["LTHSOPR"] >= 1.1 else "長期持有者虧損賣出，屬投降訊號。"),
+          f"・LTH SOPR｜{v['LTHSOPR']:.2f}，" + ("長期持有者仍有獲利但已接近 1。" if v["LTHSOPR"] < 1.1 and v["LTHSOPR"] >= 1 else "長期持有者獲利了結明顯。" if v["LTHSOPR"] >= 1.1 else "長期持有者整體虧損賣出。"),
           f"・MVRV LTH Z｜{v['LTHz']:.2f}，" + ("低於長期均值" if v["LTHz"] < 0 else "高於長期均值") + f"，週期低點 {c['lthz']:.2f}。",
           f"・AVIV LTH Z｜{v['LTHAVIVz']:.2f}，週期低點 {c['lthaz']:.2f}。",
-          f"・AVIV｜{v['AVIV']:+.3f}，" + ((f"{md(A['av_cross'])} 由負轉正，過去多出現在熊轉牛初期。") if A["av_cross"] is not None and (t - A["av_cross"]).days < 120 and v["AVIV"] > 0 else ("為正值。" if v["AVIV"] > 0 else "為負值，屬低估區。")),
+          f"・AVIV｜{v['AVIV']:+.3f}，" + ((f"{md(A['av_cross'])} 由負轉正。") if A["av_cross"] is not None and (t - A["av_cross"]).days < 120 and v["AVIV"] > 0 else ("為正值。" if v["AVIV"] > 0 else "為負值，屬低估區。")),
           f"・NUPL｜{v['NUPL']:.2f}，屬於{nz}區。",
           f"・NUPL 分族群｜短期持有者 {v['STHNUPL']:+.2f}，長期持有者 {v['LTHNUPL']:+.2f}。",
           f"・STH MVRV｜{v['STHMVRV']:.2f}，短期持有者平均{'獲利' if v['STHMVRV'] >= 1 else '虧損'}約 {abs(v['STHMVRV']-1)*100:.0f}%。",
@@ -151,9 +150,8 @@ def text(A):
           f"・True Market Mean {n0(v['TMM'])}｜STH 成本 {n0(v['STHRP'])}",
           f"・STH 布林帶冷卻線 {n0(v['BBcool'])}｜超賣線 {n0(v['BBover'])}",
           f"・週期低點 {n0(c['lowP'])}｜LTH 成本 {n0(v['LTHRP'])}", SEP, "【結論】"]
-    if p > sup_hi: L.append(f"・熊市主跌段大概率已經過去，現在是底部後的修復和吸籌期。短期先看 {k(sup_lo)}–{k(sup_hi)} 能不能守住：守住的話，{months(q1,3)}前後比較有機會轉成多頭；跌破 {k(v['BBcool'])}，就要準備回測前低。")
-    elif p > v["BBcool"]: L.append(f"・價格落在成本支撐帶附近，修復還沒確認。重新站回 {k(sup_hi)} 之上才延續修復；跌破 {k(v['BBcool'])}，就要準備回測 {k(c['lowP'])} 前低。")
-    else: L.append(f"・價格已跌破短期持有者成本與冷卻線，熊市可能進入下一段，留意 {k(c['lowP'])} 前低與 {k(v['LTHRP'])} LTH 成本。")
+    pos = "在 STH 成本與 True Market Mean 之上" if p > sup_hi else "介於 STH 成本與 True Market Mean 之間" if p >= sup_lo else ("低於 STH 成本、高於冷卻線" if p > v["BBcool"] else "低於 STH 成本與冷卻線")
+    L.append(f"・週期階段：{regime}。價格{pos}，" + ("這輪尚未" if A["sth_ok"] is None else "這輪已") + "達成「站回短期持有者成本並守住 30 天」，" + ("目前在 True Market Mean 之上已約 " + str(A["tmm_weeks"]) + " 週。" if A["tmm_ok"] else "目前在 True Market Mean 下方。"))
     return "\n".join(L).rstrip("\n")
 
 def coc_fig(path):
@@ -265,7 +263,11 @@ def prune(pre="btc_onchain_"):
 
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--dry-run", action="store_true"); ap.add_argument("--no-fetch", action="store_true"); a = ap.parse_args()
-    dfs, fresh = fetch(a.no_fetch); D = combine(dfs); A = analyse(D); T = text(A)
+    dfs, fresh = fetch(a.no_fetch); D = combine(dfs); A = analyse(D); T = text(A); CCJ = None
+    try:  # @0xcryptochan signals (free data rebuild); never blocks the main flow
+        sys.path.insert(0, HERE); import cryptochan_signals as ccs; CCJ = ccs.run()
+        T = T.replace(SEP + "\n【結論】", SEP + "\n" + "\n".join(CCJ["section"]) + SEP + "\n【結論】")
+    except Exception as e: print("WARN cryptochan:", e, file=sys.stderr)
     open(os.path.join(HERE, "onchain_text.txt"), "w").write(T)
     png = os.path.join(HERE, "onchain_summary.png"); chart(D, A, png, dfs)
     print(T); print("fresh:", fresh, "data date:", A["today"].date(), file=sys.stderr)
@@ -279,6 +281,7 @@ def main():
     j = {"date": datetime.now().strftime("%Y-%m-%d %H:%M"), "data_date": str(A["today"].date()), "fresh": all(fresh.values()), "text": T,
          "image_url": pinned(gh_put(m1, open(jb, "rb").read(), "btc onchain " + stamp), m1),
          "preview_url": pinned(gh_put(m2, open(jp, "rb").read(), "btc onchain preview " + stamp), m2)}
+    if CCJ: j["cryptochan"] = {"current": CCJ["current"], "live": CCJ["live"], "backtest": CCJ["backtest"]}
     gh_put("btc/onchain_latest.json", json.dumps(j, ensure_ascii=False, indent=1).encode(), "btc onchain latest " + stamp)
     prune(); print("published", j["image_url"], file=sys.stderr)
 if __name__ == "__main__": main()
