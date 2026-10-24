@@ -6,8 +6,9 @@ Rules: 1) trend filter = price vs 50-week MA + daily swing structure (HH/HL or L
 4) half off at T1, rest stop to entry. 5) counter-trend shorts down-weighted.
 Free public data: OKX BTC-USDT candles (1Wutc/1Dutc/4H/1H). Stdlib only.
 Usage: fengge_section.py [--price 80780] [--json]  -> prints the section, or nothing on failure (exit 0)."""
-import json, sys, urllib.request
-TITLE = "【短線交易模型】"
+import json, re, sys, urllib.request
+_CACHE = {}
+TITLE = "【交易模型】"
 UA = {"User-Agent": "btc-fengge/1.0"}
 B = "https://www.okx.com/api/v5/market/"
 def _get(u, t=10): return json.load(urllib.request.urlopen(urllib.request.Request(u, headers=UA), timeout=t))
@@ -34,9 +35,10 @@ def pivots(b, k):
 def n0(x): return f"{x:,.0f}"
 def analyse(price=None):
     w, _ = bars("1Wutc", 50)
-    d, dl = bars("1Dutc", 180)
+    d, dl = bars("1Dutc", 300)
     h4, h4l = bars("4H", 120)
     h1, h1l = bars("1H", 72)
+    _CACHE.update(w=w, d=d, h4=h4)
     if len(w) < 50 or len(d) < 60 or len(h4) < 60: raise ValueError("not enough bars")
     px = price or (h1l or h1[-1])[4]
     ma50w = sum(x[4] for x in w) / 50
@@ -108,13 +110,13 @@ def analyse(price=None):
         t2 = (hi - 1.382 * (hi - lo), hi - 1.618 * (hi - lo))
     r.update(stop=stop, t1=t1, t2=t2)
     return r
-def section(price=None):
-    r = analyse(price); px = r["price"]
+def short_lines(r):
+    px = r["price"]
     pos = "上方" if px > r["ma50w"] else "下方"
     if r["side"] == "long": tr = "順勢方向：多（只看低多）"
     elif r["side"] == "short": tr = "順勢方向：空（只看高空）"
     else: tr = "方向不一致：不做（只做順勢，放掉勝率低的交易）"
-    L = [TITLE, f"・趨勢：BTC {n0(px)} 在 50 週均線 {n0(r['ma50w'])} {pos}｜日線 {r['daily']}｜{tr}"]
+    L = [f"・順勢濾網：BTC {n0(px)} 在 50 週均線 {n0(r['ma50w'])} {pos}｜日線 {r['daily']}｜{tr}"]
     lo, hi = r["leg"]; z = r["zone"]
     leg = f"{n0(lo)}→{n0(hi)}" if r["dirn"] == "long" else f"{n0(hi)}→{n0(lo)}"
     zs = "價格在區內" if r["inzone"] else ("價格在區上方" if px > z[1] else "價格在區下方")
@@ -131,6 +133,122 @@ def section(price=None):
     L.append(f"・狀態：{state}")
     if r["side"] is not None:
         L.append(f"・{word}單計畫：止損 {n0(r['stop'])}（前波段外）｜T1 {n0(r['t1'])}｜T2 {n0(min(r['t2']))}–{n0(max(r['t2']))}（斐波 1.382–1.618）｜到 T1 出一半，餘倉止損移到開倉價")
+    return L
+import os
+HERE = os.path.dirname(os.path.abspath(__file__))
+def _rd(p):
+    try: return json.load(open(os.path.join(HERE, p)))
+    except Exception: return None
+def big_trend(r, w, d):
+    """Score the big trend from objective items (+1 bull / -1 bear / 0). Untested weighting."""
+    px = r["price"]; it = []
+    def add(name, v, txt): it.append((name, v, txt))
+    add("50w", 1 if px > r["ma50w"] else -1, f"50 週均線 {n0(r['ma50w'])} {'上方' if px > r['ma50w'] else '下方'}")
+    WH, WL = pivots(w, 2)
+    if len(WH) >= 2 and len(WL) >= 2:
+        up = WH[-1][1] > WH[-2][1]; hl = WL[-1][1] > WL[-2][1]
+        v = 1 if up and hl else -1 if not up and not hl else 0
+        add("wk", v, "週線 " + ("HH/HL 多頭" if v > 0 else "LH/LL 空頭" if v < 0 else "高低點混合"))
+    ds = r["daily"]; add("d", 1 if ds.endswith("多頭") and "失效" not in ds else -1 if ds.endswith("空頭") and "失效" not in ds else 0, "日線 " + ds)
+    ma120 = sum(x[4] for x in d[-120:]) / 120
+    add("ma120", 1 if px > ma120 else -1, f"日線 MA120 {n0(ma120)} {'上方' if px > ma120 else '下方'}")
+    import datetime as dt
+    now = dt.datetime.now(dt.timezone.utc)
+    def open_at(day):
+        ms = int(day.timestamp() * 1000)
+        for x in d:
+            if x[0] == ms: return x[1]
+    for lab, day in (("今年開盤", dt.datetime(now.year, 1, 1, tzinfo=dt.timezone.utc)), ("本月開盤", dt.datetime(now.year, now.month, 1, tzinfo=dt.timezone.utc))):
+        o = open_at(day)
+        if o: add(lab, 1 if px > o else -1, f"{lab} {n0(o)} {'上方' if px > o else '下方'}")
+    oc = _rd("out/repo_state/onchain_latest.json") or {}
+    cur = ((oc.get("cryptochan") or {}).get("current")) or {}
+    tmm = cur.get("tmm")
+    if tmm:
+        add("tmm", 1 if px > tmm else -1, f"鏈上市場均價 {n0(tmm)} {'上方' if px > tmm else '下方'}")
+    m = re.search(r"週期位置：([^，。\n]+)", oc.get("text", ""))
+    if m: it.append(("cycle", 0, "鏈上週期：" + m.group(1)))
+    if cur:
+        sig = [cur.get("ratio", 9) < cur.get("ratio60", 0), cur.get("sthrp", 0) > cur.get("ma200", 9e9), cur.get("rev30", 0) > cur.get("rev365", 9e9)]
+        k = sum(sig); add("oc", 1 if k >= 2 else -1, f"鏈上訊號 {k}/3 偏多")
+    cq = ((_rd("out/cq_consensus.json") or {}).get("consensus")) or {}
+    z = cq.get("z_score")
+    if z is not None:
+        v = -1 if z >= 0.8 else 1 if z <= -1.5 else 0
+        add("cq", v, f"分析師共識 σ {z:+.2f} " + ("偏熱（反向偏空）" if v < 0 else "極度悲觀（反向偏多）" if v > 0 else "中性"))
+    sc = sum(v for _, v, _ in it); n = sum(1 for k_, _, _ in it if k_ != "cycle")
+    dirn = "偏多" if sc >= 3 else "偏空" if sc <= -3 else ("震盪偏多" if sc > 0 else "震盪偏空" if sc < 0 else "震盪")
+    lv = sorted([x for x in [r["ma50w"], tmm] if x])
+    return dict(score=sc, n=n, dirn=dirn, items=it, floor=lv, ma120=ma120)
+def nearest(levels, px, up):
+    c = sorted({round(x) for x in levels if (x > px * 1.008 if up else x < px * 0.992)}, reverse=not up)
+    out = []
+    for x in c:
+        if not out or abs(x - out[-1]) / out[-1] >= 0.008: out.append(x)
+    return out
+def short_bias(r, d, h4):
+    px = r["price"]; sc = 0
+    ds = r["daily"]; sc += 1 if ds.endswith("多頭") and "失效" not in ds else -1 if ds.endswith("空頭") and "失效" not in ds else 0
+    H4, L4 = pivots(h4, 2)
+    if len(H4) >= 2 and len(L4) >= 2:
+        sc += 1 if H4[-1][1] > H4[-2][1] and L4[-1][1] > L4[-2][1] else -1 if H4[-1][1] < H4[-2][1] and L4[-1][1] < L4[-2][1] else 0
+    ma20 = sum(x[4] for x in h4[-20:]) / 20; sc += 1 if px > ma20 else -1
+    rs = (_rd("out/range_state.json") or {}).get("active") or {}
+    rlo, rhi = rs.get("lo"), rs.get("hi")
+    if rlo and px < rlo: sc -= 1
+    if rhi and px > rhi: sc += 1
+    bias = "偏多" if sc > 0 else "偏空" if sc < 0 else ("偏多" if px > ma20 else "偏空")
+    DH, DL = pivots(d, 3)
+    sup = [p for _, p in DL] + [p for _, p in L4[-6:]] + [r["ma50w"]] + [rlo] * bool(rlo)
+    res = [p for _, p in DH] + [p for _, p in H4[-6:]] + [rhi] * bool(rhi) + [rlo] * bool(rlo)
+    down = nearest(sup, px, False); upl = nearest(res, px, True)
+    rn = lambda a: round(a / 1000) * 1000
+    if bias == "偏空":
+        tg = down[:2] or [rn(px * 0.97)]
+        inv = (rlo if rlo and rlo > px else (upl[0] if upl else rn(px * 1.02)))
+        nxt = [x for x in upl if x > inv * 1.008][:1] or [rn(inv * 1.02)]
+        fail = f"4H 收盤站回 {n0(inv)} 視為假跌破，轉看 {n0(nxt[0])}"
+    else:
+        tg = upl[:2] or [rn(px * 1.03)]
+        inv = down[0] if down else rn(px * 0.98)
+        nxt = [x for x in down if x < inv * 0.992][:1] or [rn(inv * 0.98)]
+        fail = f"4H 收盤跌破 {n0(inv)} 視為假突破，轉看 {n0(nxt[0])}"
+    return dict(bias=bias, score=sc, targets=tg, fail=fail, ma20=ma20)
+def rvw_line():
+    import subprocess
+    try:
+        o = subprocess.run([sys.executable, os.path.join(HERE, "ls_section.py"), "--rvw"], cwd=HERE, capture_output=True, text=True, timeout=40).stdout
+        m = re.search(r"巨鯨散戶差：([^\n]+)", o)
+        if not m: return None
+        v = [float(x) for x in re.findall(r"([+-]?\d+\.\d+)", m.group(1))]
+        if not v: return None
+        a = sum(v) / len(v)
+        t = "大戶明顯比散戶偏空，支持偏空傾向" if a <= -0.5 else "大戶比散戶偏多，支持偏多傾向" if a >= 0.3 else "大戶散戶分歧不大"
+        return f"・大戶散戶：巨鯨散戶差 {m.group(1).strip()}｜{t}"
+    except Exception:
+        return None
+def section(price=None):
+    r = analyse(price); px = r["price"]
+    w = _CACHE["w"]; d = _CACHE["d"]; h4 = _CACHE["h4"]
+    L = [TITLE + "（規則未回測）", "大趨勢"]
+    try:
+        bt = big_trend(r, w, d)
+        L.append(f"・方向：{bt['dirn']}（評分 {bt['score']:+d}／{bt['n']} 項）")
+        L.append("・依據：" + "、".join(t for _, _, t in bt["items"]))
+        fl = bt["floor"]
+        if fl:
+            L.append(f"・多空分界：{n0(fl[0])}" + (f"–{n0(fl[-1])}" if len(fl) > 1 else "") + "（50 週均線／鏈上市場均價），守住維持多方大結構，跌破轉為偏空；上方要站回今年開盤價才算回到強勢")
+    except Exception as e:
+        print("big trend skipped:", e, file=sys.stderr); bt = None
+    L.append("短線")
+    try:
+        sb = short_bias(r, d, h4)
+        L.append(f"・傾向：{sb['bias']}｜下一目標 {'、'.join(n0(x) for x in sb['targets'])}｜失效：{sb['fail']}")
+    except Exception as e:
+        print("short bias skipped:", e, file=sys.stderr)
+    rv = rvw_line()
+    if rv: L.append(rv)
+    L += short_lines(r)
     L.append("・規則樣本小：實單 15 筆，各型態 1–4 筆；逆勢空單止損命中率高，已降權")
     return "\n".join(L), r
 if __name__ == "__main__":

@@ -222,8 +222,8 @@ def add_fengge(text):
         m = re.search(r"｜BTC ([\d,]+(?:\.\d+)?)", "\n".join(text.splitlines()[:3]))
         cmd = [sys.executable, os.path.join(HERE, "fengge_section.py")] + (["--price", m.group(1).replace(",", "")] if m else [])
         sec = subprocess.run(cmd, cwd=HERE, capture_output=True, text=True, timeout=60).stdout.strip()
-        if not sec.startswith("【短線交易模型】"): return text
-        t = re.sub(r"\n*" + re.escape(DIV) + r"\n【短線交易模型】.*?(?=\n\n" + re.escape(DIV) + r"\n|\Z)", "", text, flags=re.S).rstrip()
+        if not sec.startswith(("【交易模型】", "【短線交易模型】")): return text
+        t = re.sub(r"\n*" + re.escape(DIV) + r"\n【(?:短線)?交易模型】.*?(?=\n\n" + re.escape(DIV) + r"\n|\Z)", "", text, flags=re.S).rstrip()
         i = t.find("\n\n" + DIV + "\n【Binance")
         blk = "\n\n" + DIV + "\n" + sec
         return (t[:i] + blk + t[i:] if i >= 0 else t + blk)[:4900]
