@@ -21,6 +21,13 @@ for f in $SYNC $LOCALONLY; do
     [ "$(sha1sum <"$f")" = "$(sha1sum <"$R/$f")" ] || diff+=("$f")
   fi
 done
+# onchain_latest.json (STH on-chain data used by Binance Square posts and onchain analysis): restore/refresh from repo btc/
+mkdir -p out/repo_state; OJ=out/repo_state/onchain_latest.json
+if [ -f "$TMP/btc/onchain_latest.json" ]; then
+  if [ ! -f "$OJ" ]; then cp "$TMP/btc/onchain_latest.json" "$OJ" && fixed+=("restored:$OJ") || w "restore $OJ failed"
+  elif ! cmp -s "$OJ" "$TMP/btc/onchain_latest.json"; then cp "$TMP/btc/onchain_latest.json" "$OJ"; fi
+else [ -f "$OJ" ] || w "$OJ missing and not in repo"; fi
+[ -f "$OJ" ] && { age=$(( ($(date +%s)-$(date -d "$(python3 -c "import json;print(json.load(open('$OJ'))['date'])" 2>/dev/null || echo 1970-01-01)" +%s))/3600 )); [ $age -le 30 ] || w "onchain_latest.json stale ${age}h"; }
 [ -d btcsent ] || { cp -r "$R/btcsent" btcsent 2>/dev/null && fixed+=("restored:btcsent") || w "btcsent missing"; }
 for d in out out/positioning out/publish out/grid out/kol; do [ -d "$d" ] || { mkdir -p "$d"; fixed+=("mkdir:$d"); }; done
 if ! .venv/bin/python -c "import requests,numpy,pandas,matplotlib,PIL,bs4" 2>/dev/null; then
