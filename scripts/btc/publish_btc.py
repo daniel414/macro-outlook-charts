@@ -215,6 +215,20 @@ def add_range(text):
         return (t[:m.start()] + blk + "\n・" + ln + t[m.start() + len(blk):])[:4900]
     except Exception as e:
         print("range skipped:", e, file=sys.stderr); return text
+def add_fengge(text):
+    """Insert 【鋒哥短線參考】 (fengge_section.py, run as a script; Daniel 2026-10-24) after 【技術結構】, before 【Binance…】
+    (else at the end). Replaced if present. Reference only, does not replace the main model. Unchanged on failure."""
+    try:
+        m = re.search(r"｜BTC ([\d,]+(?:\.\d+)?)", "\n".join(text.splitlines()[:3]))
+        cmd = [sys.executable, os.path.join(HERE, "fengge_section.py")] + (["--price", m.group(1).replace(",", "")] if m else [])
+        sec = subprocess.run(cmd, cwd=HERE, capture_output=True, text=True, timeout=60).stdout.strip()
+        if not sec.startswith("【鋒哥短線參考】"): return text
+        t = re.sub(r"\n*" + re.escape(DIV) + r"\n【鋒哥短線參考】.*?(?=\n\n" + re.escape(DIV) + r"\n|\Z)", "", text, flags=re.S).rstrip()
+        i = t.find("\n\n" + DIV + "\n【Binance")
+        blk = "\n\n" + DIV + "\n" + sec
+        return (t[:i] + blk + t[i:] if i >= 0 else t + blk)[:4900]
+    except Exception as e:
+        print("fengge skipped:", e, file=sys.stderr); return text
 BN_FRESH = 2 * 3600
 def bn_latest():
     import sqlite3
@@ -311,7 +325,7 @@ def main():
     if a.text: text = open(a.text).read().strip()[:4900]
     elif j: text = summary(j, when)
     else: sys.exit("need --text or --json (or run without args)")
-    text = add_notes(strip_hl(add_binance(add_longshort(add_rvw(add_range(add_structure(text)))))))
+    text = add_notes(strip_hl(add_binance(add_fengge(add_longshort(add_rvw(add_range(add_structure(text))))))))
     stamp = when.strftime("%Y%m%d_%H%M")
     os.makedirs(os.path.join(HERE, "out/publish"), exist_ok=True)
     big = os.path.join(HERE, f"out/publish/btc_positioning_{stamp}.jpg"); pre = big[:-4] + "_preview.jpg"

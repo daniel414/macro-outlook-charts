@@ -139,9 +139,10 @@ def summary(j, when, ai):
     L += sec("【Ahr999】", f"・{f1(ah,2,False)}{zone}")
     # 【Binance】 is appended last by publish_btc.add_binance (live www rows -> 【Binance】; daily-dump fallback -> 【Binance（截至 …）】).
     # objective structure section (btc_structure.py via publish_btc.add_structure); omitted on any failure.
+    # 【鋒哥短線參考】 (fengge_section.py via publish_btc.add_fengge, 2026-10-24) after 【技術結構】; omitted on any failure.
     # 【多空比】 (ls_section.py via publish_btc.add_longshort) before 【未平倉量】; sources it could not fetch show 無資料.
     # Hyperliquid removed 2026-10-20 (Daniel): strip_hl also cleans carried-over AI sentences.
-    return P.add_notes(P.strip_hl(P.add_binance(P.add_longshort(P.add_structure(P.EMOJI.sub("", "\n".join(L))[:4900])))))
+    return P.add_notes(P.strip_hl(P.add_binance(P.add_fengge(P.add_longshort(P.add_structure(P.EMOJI.sub("", "\n".join(L))[:4900]))))))
 
 
 def build_images(png, stamp):
