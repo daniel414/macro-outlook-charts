@@ -293,8 +293,19 @@ FAV_VIEWS = {
     "long":  [("鋒哥", "57.7K 為本輪低點，目標回前高約 130K；失效：跌回 70K，再破 60K 則反轉失敗"),
               ("@KillaXBT", "2027 年 4 月底至 8 月初回前高，本輪週期可能只有約兩年")],
 }
-_LONG_KW = re.compile(r"本輪|HTF|兆|牛市|下輪|202[7-9]|中位數|下個低點|1[0-9]{2}(?:\.\d)?K|1[0-9]{2},\d{3}")
-_MID_KW = re.compile(r"週|區間|[Ss]top [Hh]unt|月|50D")
+def _tf(seg):
+    """Timeframe of an analyst level: short (hours–days) / mid (weeks) / long (cycle). Timeframe cues first, then price distance (>=100K)."""
+    if re.search(r"數日|日內|4H|1H|日收|日線|5日", seg): return "short"
+    if re.search(r"本輪|下輪|週期|[0-9]+ ?年|202[7-9]|兆|中位數", seg) or re.search(r"(?<![\d.,])1[0-9]{2}(?:\.\d)?K|(?<![\d,])1[0-9]{2},\d{3}", seg): return "long"
+    if re.search(r"週|月|區間|HTF|[Ss]top [Hh]unt", seg): return "mid"
+    return "short"
+def _quiet(a, days=3):
+    """No BTC view in ~3 days -> 近期未談 BTC."""
+    if a.get("stance") == "未談BTC" or re.search(r"未談\s*BTC", a.get("reason", "")): return True
+    try:
+        import datetime as _d
+        return (_d.date.today() - _d.date.fromisoformat(a.get("latest_post", "")[:10])).days > days
+    except Exception: return False
 def kol_layers():
     """Tracked analysts' levels from kol/latest_view.json split into short/mid/long (keyword rule)."""
     out = {"short": [], "mid": [], "long": []}
@@ -305,9 +316,9 @@ def kol_layers():
     skip = {"traderfengge"}   # 鋒哥 已在 FAV_VIEWS
     for a in d.get("accounts", []):
         lv = (a.get("levels") or "").strip()
-        if a.get("stance") == "未談BTC" or a["handle"] in skip or lv in ("", "-"): continue
+        if _quiet(a) or a["handle"] in skip or lv in ("", "-"): continue
         for seg in [x.strip() for x in lv.split("｜") if x.strip()]:
-            k = "long" if _LONG_KW.search(seg) else "mid" if _MID_KW.search(seg) else "short"
+            k = _tf(seg)
             out[k].append((a["handle"], a.get("stance", ""), seg))
     return out
 def views_block(layer, kl, n=3):

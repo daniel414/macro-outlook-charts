@@ -104,6 +104,21 @@ def kfmt(t):
     t = re.sub(r"(\d+(?:\.\d+)?)\s*[–-]\s*(\d+(?:\.\d+)?)K", lambda m: k(m.group(1)) + "–" + k(m.group(2)), t or "")
     t = re.sub(r"(\d+(?:\.\d+)?)K", lambda m: k(m.group(1)), t)
     return re.sub(r"(?<![\d,.])(\d{5,})(?![\d.])", lambda m: f"{int(m.group(1)):,}", t)
+def _tf(seg):
+    """Timeframe of an analyst level: short (hours–days) / mid (weeks) / long (cycle). Timeframe cues first, then price distance (>=100K)."""
+    if re.search(r"數日|日內|4H|1H|日收|日線|5日", seg): return "short"
+    if re.search(r"本輪|下輪|週期|[0-9]+ ?年|202[7-9]|兆|中位數", seg) or re.search(r"(?<![\d.,])1[0-9]{2}(?:\.\d)?K|(?<![\d,])1[0-9]{2},\d{3}", seg): return "long"
+    if re.search(r"週|月|區間|HTF|[Ss]top [Hh]unt", seg): return "mid"
+    return "short"
+def _quiet(a, days=3):
+    """No BTC view in ~3 days -> 近期未談 BTC."""
+    if a.get("stance") == "未談BTC" or re.search(r"未談\s*BTC", a.get("reason", "")): return True
+    try:
+        import datetime as _d
+        return (_d.date.today() - _d.date.fromisoformat(a.get("latest_post", "")[:10])).days > days
+    except Exception: return False
+# 鋒哥 長期觀點（與 fengge_section.FAV_VIEWS long 同步，人工維護）
+KOL_EXTRA_LONG = {"traderfengge": ["57,700 為本輪低點", "目標回前高約 130,000", "失效：跌回 70,000，再破 60,000 則反轉失敗"]}
 def kol_text():
     """/btckol text: title+time, ━ blocks: 整體立場 / 共同關注價位 / 主要分歧 / 各分析師 (觀點+短線+長期 per analyst)."""
     try:
@@ -111,7 +126,8 @@ def kol_text():
     except Exception:
         return ""
     ts = datetime.strptime(d["updated_at"][:16], "%Y-%m-%d %H:%M").strftime("%Y.%m.%d %H:%M")
-    n = lambda s: sum(1 for a in acc if a.get("stance") == s)
+    st = lambda a: "未談BTC" if _quiet(a) else a.get("stance")
+    n = lambda s: sum(1 for a in acc if st(a) == s)
     px = ""
     try:
         pf = os.path.join(HERE, "out/posgrid_now.json")
@@ -130,13 +146,12 @@ def kol_text():
     lab = {"偏多": "看多", "偏空": "看空", "中性": "中性", "未談BTC": "未談"}
     order = {"偏多": 0, "中性": 1, "偏空": 2, "未談BTC": 3}
     L += ["", KOL_DIV, "【各分析師】"]
-    LKW = re.compile(r"本輪|HTF|兆|牛市|下輪|202[7-9]|中位數|下個低點|1[0-9]{2}(?:\.\d)?K|1[0-9]{2},\d{3}")
     quiet = []
-    for a in sorted(acc, key=lambda a: order.get(a.get("stance"), 9)):
-        if a.get("stance") == "未談BTC": quiet.append(a["handle"]); continue
+    for a in sorted(acc, key=lambda a: order.get(st(a), 9)):
+        if st(a) == "未談BTC": quiet.append(a["handle"]); continue
         r = kfmt(a.get("reason", "")).split("；")[0].rstrip("。")
         segs = [x.strip() for x in (a.get("levels") or "").split("｜") if x.strip() and x.strip() != "-"]
-        lo = [kfmt(x) for x in segs if LKW.search(x)]; sh = [kfmt(x) for x in segs if not LKW.search(x)]
+        lo = [kfmt(x) for x in segs if _tf(x) == "long"] + KOL_EXTRA_LONG.get(a["handle"], []); sh = [kfmt(x) for x in segs if _tf(x) != "long"]
         L.append(f"・{a['handle']}｜{lab.get(a.get('stance'), a.get('stance', '-'))}" + (f"（{a['latest_post'][5:].replace('-', '/')}）" if a.get("latest_post") else ""))
         if r: L.append(f"  觀點：{r}")
         if sh: L.append("  短線：" + "；".join(sh))
