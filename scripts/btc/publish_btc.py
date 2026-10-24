@@ -283,13 +283,41 @@ def build_forecast(text):
         if not fc.startswith("BTC 走勢預測"): return ""
         ts = re.search(r"\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}", text)
         if ts: fc = re.sub(r"\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}", ts.group(0), fc, count=1)
-        return fc[:4900]
+        return fc   # no truncation: split into parts instead (Daniel 2026-10-24 17:38)
     except Exception as e:
         print("forecast skipped:", e, file=sys.stderr); return ""
+LINE_MAX = 4950
+def split_parts(t, lim=LINE_MAX):
+    """Split on section boundaries (blank line + DIV); oversize sections fall back to line breaks. Each part <= lim chars."""
+    secs = re.split(r"\n\n(?=" + re.escape(DIV) + r"\n)", t.strip()) if t else []
+    units = []
+    for x in secs:
+        if len(x) <= lim: units.append(x); continue
+        cur = ""
+        for ln in x.split("\n"):
+            while len(ln) > lim: units.append(ln[:lim]); ln = ln[lim:]
+            if cur and len(cur) + 1 + len(ln) > lim: units.append(cur); cur = ln
+            else: cur = cur + "\n" + ln if cur else ln
+        if cur: units.append(cur)
+    parts, cur = [], ""
+    for u in units:
+        if cur and len(cur) + 2 + len(u) > lim: parts.append(cur); cur = u
+        else: cur = cur + "\n\n" + u if cur else u
+    if cur: parts.append(cur)
+    return parts
+def write_forecast_parts(fc):
+    """out/publish/forecast_send.txt = full forecast; forecast_part1.txt, part2... each <= 4950 chars (for chat push / future Worker)."""
+    for f in glob.glob(os.path.join(HERE, "out/publish/forecast_part*.txt")): os.remove(f)
+    parts = split_parts(fc)
+    for i, x in enumerate(parts, 1):
+        with open(os.path.join(HERE, f"out/publish/forecast_part{i}.txt"), "w") as fh: fh.write(x)
+    return parts
 def merge_summary(fc, data):
+    """Forecast prepended while the merged text fits one LINE message; otherwise summary_text = data only and
+    the forecast goes out as separate parts (forecast_send.txt / forecast_part*.txt / forecast_parts). Nothing dropped."""
     if not (FORECAST_IN_SUMMARY and fc): return data
     m = fc + "\n\n" + DIV + "\n\n" + data
-    return m if len(m) <= 4950 else data
+    return m if len(m) <= LINE_MAX else data
 BN_FRESH = 2 * 3600
 def bn_latest():
     import sqlite3
@@ -406,13 +434,15 @@ def main():
         q -= 10
     print("built", big, os.path.getsize(big), pre, os.path.getsize(pre), file=sys.stderr)
     with open(FORECAST_FILE, "w") as fh: fh.write(fc)
+    fparts = write_forecast_parts(fc)
+    merged = merge_summary(fc, text) != text
     print(text)
-    print("FORECAST_FILE", FORECAST_FILE, len(fc), file=sys.stderr)
+    print("FORECAST_FILE", FORECAST_FILE, len(fc), "parts", [len(x) for x in fparts], "merged_into_summary", merged, file=sys.stderr)
     if a.dry_run: return
     n1 = "btc/" + os.path.basename(big); n2 = "btc/" + os.path.basename(pre)
     u1 = pinned(gh_put(n1, open(big, "rb").read(), "btc chart " + stamp), n1)
     u2 = pinned(gh_put(n2, open(pre, "rb").read(), "btc preview " + stamp), n2)
-    d = {"date": when.strftime("%Y-%m-%d %H:%M"), "summary_text": merge_summary(fc, text), "forecast_text": fc, "change_text": change_text(), "lead_text": lead_text(), "image_url": u1, "preview_url": u2}
+    d = {"date": when.strftime("%Y-%m-%d %H:%M"), "summary_text": merge_summary(fc, text), "forecast_text": fc, "forecast_parts": fparts, "forecast_merged": merged, "change_text": change_text(), "lead_text": lead_text(), "image_url": u1, "preview_url": u2}
     publish_kol(when, stamp)
     gh_put("btc/latest.json", json.dumps(d, ensure_ascii=False, indent=1).encode(), "btc latest " + stamp)
     print("PUBLISHED", u1, u2, file=sys.stderr)
