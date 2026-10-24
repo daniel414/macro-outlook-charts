@@ -278,7 +278,7 @@ def build_forecast(text):
     try:
         head = "\n".join(text.splitlines()[:3])
         m = re.search(r"｜BTC ([\d,]+(?:\.\d+)?)", head)
-        cmd = [sys.executable, os.path.join(HERE, "fengge_section.py"), "--forecast"] + (["--price", m.group(1).replace(",", "")] if m else [])
+        cmd = [sys.executable, os.path.join(HERE, "fengge_section.py"), "--forecast-compact"] + (["--price", m.group(1).replace(",", "")] if m else [])
         fc = subprocess.run(cmd, cwd=HERE, capture_output=True, text=True, timeout=60).stdout.strip()
         if not fc.startswith("BTC 走勢預測"): return ""
         ts = re.search(r"\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}", text)

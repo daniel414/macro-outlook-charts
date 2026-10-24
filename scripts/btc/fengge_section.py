@@ -414,10 +414,75 @@ def forecast(price=None):
     L.append(f"・下個週期底預估在 {LT['next_bottom']}")
     L += views_block("long", kl)
     return "\n".join(L)
+def _kv(t):
+    """80.5K -> 80,500 style kept short: leave K notation (compact message)."""
+    return (t or "").strip()
+def _kol_digest():
+    try:
+        d = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "kol/latest_view.json")))
+    except Exception: d = {}
+    acc = [a for a in d.get("accounts", []) if not _quiet(a)]
+    cnt = {k: sum(a.get("stance") == k for a in acc) for k in ("偏多", "中性", "偏空")}
+    lv = {}
+    for part in (d.get("common_levels") or "").split("｜"):
+        m = re.match(r"\s*(支撐|壓力|上方目標|下方目標)\s*(.+)", part)
+        if m: lv[m.group(1)] = [x.strip() for x in m.group(2).split("、") if x.strip()]
+    div = [x.strip().rstrip("。") for x in re.split(r"[；;]", d.get("divergence") or "") if x.strip()]
+    return cnt, lv, div
+def _fav(layer, who="鋒哥"):
+    return next((t for w, t in FAV_VIEWS.get(layer, []) if w == who), "")
+def forecast_compact(price=None):
+    """Compact synthesis of our model + tracked analysts (Daniel approved 2026-10-24 19:42). Synthesis lines auto-derived from
+    kol/latest_view.json (stance counts, common levels, divergence) + FAV_VIEWS (鋒哥) + LONG_VIEW (@KillaXBT path)."""
+    import datetime as dt
+    r = analyse(price); px = r["price"]; w, d, h4 = _CACHE["w"], _CACHE["d"], _CACHE["h4"]
+    lv = onchain_levels()
+    tw = dt.datetime.now(dt.timezone(dt.timedelta(hours=8)))
+    cnt, kl, div = _kol_digest()
+    L = ["BTC 走勢預測", f"{tw.strftime('%Y.%m.%d %H:%M')} (UTC+8)｜BTC {n0(px)}"]
+    # 短線
+    sb = short_bias(r, d, h4)
+    inv = re.search(r"([\d,]{5,})", sb["fail"]); inv = inv.group(1) if inv else ""
+    L += ["", "【短線】數天"]
+    L.append(f"方向：{sb['bias']}｜目標 {'、'.join(n0(x) for x in sb['targets'])}｜失效：4H 收回 {inv}")
+    s1 = [f"模型{sb['bias']}"]
+    if _fav("short"): s1.append("鋒哥：" + _fav("short"))
+    s1.append(f"分析師 {cnt['偏多']} 偏多、{cnt['中性']} 中性、{cnt['偏空']} 偏空" + (f"，共同支撐 {'、'.join(kl['支撐'][:3])}" if kl.get("支撐") else ""))
+    if div: s1.append("分歧：" + div[-1])
+    L.append("；".join(s1) + "。")
+    # 中期
+    DH, DL = pivots(d, 3)
+    dn = [(p, "") for _, p in DL[-8:]] + [(r["ma50w"], ""), (lv["tmm"], ""), (lv["sth"], "")]
+    dn += [(k * 1000.0, "") for k in range(int(px // 5000) * 5, int(px // 5000) * 5 - 16, -5)]
+    up = [(p, "") for _, p in DH[-8:]] + [(lv["hot"], "")] + [(k * 1000.0, "") for k in range(int(px // 5000) * 5 + 5, int(px // 5000) * 5 + 16, 5)]
+    zd = [z for z in zones(dn, px, True) if z["ref"] > px * 0.8][:3]
+    zu = [z for z in zones(up, px, False) if z["ref"] < px * 1.2][:2]
+    L += ["", "【中期】數週"]
+    L.append(f"方向：先掃下方流動性再回升｜目標 {'、'.join(zs(z) for z in zd)}｜失效：日線收在 {zs(zd[-1]) if zd else '75K'} 下方")
+    flo = [x for x in (lv["sth"], lv["tmm"], r["ma50w"]) if x]
+    s2 = []
+    if flo: s2.append(f"{n0(min(flo))}–{n0(max(flo))} 是 50 週均線、短期持有者成本與鏈上市場均價的交會區")
+    if _fav("mid"): s2.append("鋒哥：" + _fav("mid"))
+    s2.append(f"上方 {zs(zu[0]) if zu else '前高'} 站回才轉強" + (f"，分析師共同壓力 {'、'.join(kl['壓力'][-2:])}" if kl.get("壓力") else "") + (f"、上方目標 {'、'.join(kl['上方目標'][:2])}" if kl.get("上方目標") else ""))
+    L.append("；".join(s2) + "。")
+    # 長期
+    LT = LONG_VIEW
+    L += ["", "【長期】週期"]
+    L.append(f"方向：偏多，熊市低點大概率已出現（{n0(lv['cyc_low']) if lv.get('cyc_low') else n0(LT['low'])}）｜目標 前高 {n0(LT['ath'])}，再上 {LT['top'].split('（')[0]}｜失效：跌回 70K 以下，再破 60K 反轉失敗")
+    s3 = []
+    if lv.get("cycle"): s3.append(f"鏈上週期為{lv['cycle']}")
+    if _fav("long"): s3.append("鋒哥：" + _fav("long"))
+    s3.append(f"@KillaXBT 猜測路徑：{LT['ath_window']}回前高，下個週期底在 {LT['next_bottom']}")
+    L.append("；".join(s3) + "。")
+    return "\n".join(L)
 if __name__ == "__main__":
     try:
         p = None
         if "--price" in sys.argv: p = float(sys.argv[sys.argv.index("--price") + 1])
+        if "--forecast-compact" in sys.argv:
+            t = forecast_compact(p); print(t)
+            with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "out/publish/forecast_compact_draft.txt"), "w") as fh: fh.write(t)
+            sys.exit(0)
         if "--forecast" in sys.argv: print(forecast(p)); sys.exit(0)
         s, r = section(p)
         print(json.dumps(r, ensure_ascii=False) if "--json" in sys.argv else s)
