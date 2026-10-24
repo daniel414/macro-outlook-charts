@@ -1,8 +1,62 @@
 {
-  "updated_at": "2026-10-22T22:48:26+08:00",
+  "updated_at": "2026-10-24T13:21:09+08:00",
   "title": "大佬觀點",
-  "text": "大佬觀點\n2026.10.22 22:48 (UTC+8)｜近 7 天 10 集\n\n──────────\n【Benjamin Cowen｜Bitcoin Bull Market Support Band】\n・日期｜10/22\n・來賓｜無（單人節目）\n・Ben｜他說比特幣已跌回 82,000 美元下方；7/21、8/21、9/21 都是局部高點，若照這個節奏，下一個高點會落在 10/21 到 11/3 期中選舉之間。\n・Ben｜他說那斯達克已來到牛市支撐帶、標普逼近，以太幣、TOTAL2、TOTAL3、MicroStrategy 都已測過 21 週 EMA，大致只剩比特幣還沒測，顯示比特幣相對強勢。\n・Ben｜他仍認為比特幣主導率很可能上升，因為貨幣政策正回到偏緊，產業內資金從高風險資產流向比特幣，山寨幣對比特幣已失血多年。\n・Ben｜他說技術面偏多，但股市與能源價格的總經環境偏空；期中選舉年 Q4 若修正，通常是股市下跌把比特幣一起帶下去，而不是比特幣本身出問題。\n・連結｜https://www.youtube.com/watch?v=KZ1Jro92t48\n\n──────────\n【All-In｜Arvind Krishna & Nikesh Arora: Quantum Threat, Open vs Frontier AI, AI Cyber Warfare & SaaS Collapse】\n・日期｜10/22\n・來賓｜Arvind Krishna、Nikesh Arora\n・Arvind Krishna｜他說可用的量子電腦時程落在 2028 到 2033 年，取中間約 2030 年，屆時將破解現行加密；後量子加密早已成熟，企業現在就該採用。\n・Nikesh Arora｜他說不能等到 2029、2030 年，企業現在就該把 IT 架構換成抗量子的基礎設施，若時程是 2029–30 年就已經太晚。\n・Arvind Krishna｜他說自己架設中國開源權重模型跑在自有 GPU 上，每百萬 token 成本可從約 20–50 美元降到 1–2 美元，便宜約 40 倍，並能完成約 95% 的工作。\n・Nikesh Arora｜他說資安股近期因 AI Mythos 事件享有較高估值，但這會隨時間回歸合理；資安以外的軟體終值難以判斷，未來幾年 SaaS 會遭到巨大顛覆。\n・連結｜https://www.youtube.com/watch?v=yzk44lz-RGI\n\n──────────\n【Benjamin Cowen｜Bitcoin Holds Above $83k】\n・日期｜10/22\n・來賓｜無（單人節目）\n・Ben｜他說比特幣只出現一次週收盤跌破 83K，這還不夠，要連續多次週收盤跌破才算空方重新掌控，目前仍是多頭主導。\n・Ben｜他說比特幣日線從約 81.7K 的 50 日均線反彈，比現價低約 3,000 美元。\n・Ben｜他說多數山寨幣沒那麼強，比特幣主導率正逼近 61%，他認為主導率很可能會繼續上升。\n・Ben｜他說從聯邦基金利率與 2 年期殖利率的位置看，未來幾週很有機會回到更緊的貨幣政策，這讓比特幣主導率上升最合理。\n・連結｜https://www.youtube.com/watch?v=oYPawyUxnnE\n\n──────────\n【a16z｜Should You Trust ChatGPT With Your Health?】\n・日期｜10/20\n・來賓｜Karan Singhal\n・Karan Singhal｜他說每週有超過 3 億人用 ChatGPT 問健康與保健問題，而且使用量持續快速成長，其中大多數是免費用戶、多數在美國以外。\n・Karan Singhal｜他說醫療業有大量老舊軟體、不會很快都有 MCP 連接器，正因如此，醫療非常適合 AI 代理與電腦操作（computer use）。\n・Karan Singhal｜他說合作醫療體系 AdventHealth 回報，用 AI 處理行政流程後，許多行政工作成本降低約 80%。\n・Karan Singhal｜他說醫療 AI 還沒對美國約 5.3 兆美元的醫療支出產生總體影響，但看好未來幾年慢性病管理、病歷文書與行政後勤等支出整體壓縮，前提是整合流程與規模化部署。\n・連結｜https://www.youtube.com/watch?v=9n0MI4D7TCM\n\n──────────\n【All-In｜Dylan Field: Is AI Replacing Designers?, Design is the New Code & Democratizing Creativity】\n・日期｜10/20\n・來賓｜Dylan Field\n・Dylan Field｜他說隨著寫程式的模型變強，誰都能產生程式碼，軟體的差異化價值往上移到設計、品牌與觀點，所以「設計就是新的程式碼」。\n・Dylan Field｜被問到 Anthropic 推出 Claude Design 是否影響 Figma 生意，他說沒有到明顯的程度。\n・Dylan Field｜他認為不是所有 SaaS 公司都沒事，也不是全都完了；鎖定特定使用者、深耕使用流程的軟體公司仍能長期成長，並舉 Cursor 在大模型實驗室追趕下仍大幅成長為例。\n・Dylan Field｜他說很容易把模型的進步誤當成產品的進步，專業設計工具要花很長時間把工作流程做對。\n・連結｜https://www.youtube.com/watch?v=2Zj6uMv3kTA\n\n──────────\n【Benjamin Cowen｜What will the Federal Reserve Do Next?】\n・日期｜10/20\n・來賓｜無（單人節目）\n・Ben｜他更正先前口誤：市場預估聯準會 10 月會議是八成多機率維持利率不變，而不是八成機率升息。\n・Ben｜他說 2026 年的利率路徑像 2018 年：期中選舉年 9 月升息、選後那次會議暫停，2018 年 12 月又再升息到 2.5%。\n・Ben｜他說 2018 年底聯準會預告 2019 年再升兩次息，結果 2019 年完全沒升、7 月或 9 月就開始降息，所以市場現在預估 2027 年再升兩次未必成真。\n・Ben｜他說進入 2027 年要留意長端殖利率大漲是否開始壓到企業，若出現成長恐慌，市場預期的升息可能根本不會出現。\n・連結｜https://www.youtube.com/watch?v=WAMu9tSOyyY\n\n──────────\n【a16z｜Why a $1M Startup Wasn’t Worth Building in the Age of AI】\n・日期｜10/19\n・來賓｜Jean-Denis Greze、Alex Rampell\n・Jean-Denis Greze｜他說 SMB 報稅產品第一年營收略低於 100 萬、第二年目標約 250–300 萬，在 AI 之前會是合理事業，但在 AI 之後已不可能做成風險投資規模的公司。\n・Jean-Denis Greze｜他認為更關鍵的是，既有業者能用同一套技術更快為既有客戶自動化報稅，會比新創搶下市占還快。\n・Alex Rampell｜他說整體 agent 流量已大幅超過人類流量，並提到 Amazon 因廣告商業模式而對 agent 採較對抗的態度。\n・Jean-Denis Greze｜他說若自己是擁有約 700–800 億美元年廣告營收的 Amazon，不該封鎖 agents；若硬扛未來，Amazon 可能失去一大塊廣告業務。\n・連結｜https://www.youtube.com/watch?v=o_5f4N6Nq80\n\n──────────\n【Benjamin Cowen｜Has the Q4 Equity Correction Finally Arrived?】\n・日期｜10/18\n・來賓｜無（單人節目）\n・Ben｜標普 500 離高點只跌約 2%，但他說如果第四季真有修正，就會像現在這樣從其他市場的弱勢開始，羅素 2000 已跌約 11%、那斯達克約 7%。\n・Ben｜他認為聯準會 10 月很可能不升息（FedWatch 約 84.5%），長端殖利率可能在期中選舉前再彈一次，就像 2018 年 9 月升息、跳過選前會議、12 月再升息的路徑。\n・Ben｜他說油價若沒人處理會繼續上漲，直到中東情勢改變，這是第四季股市修正最完美的劇本。\n・Ben｜他說歷史上讓比特幣在第四季回落的是股市修正，標普修正可能讓比特幣在正要突破時停下來，就像上輪比特幣熊市讓山寨季沒來。\n・連結｜https://www.youtube.com/watch?v=VA_Qr4-s994\n\n──────────\n【All-In｜CoreWeave Crash, AI Trade Cracks, Anthropic IPO Red Flags, Bill Gates the Doomer】\n・日期｜10/17\n・來賓｜Ben Horowitz\n・Chamath｜CoreWeave 的信用違約交換（CDS）本週升到約 953 個基點，換算約每年 16%、五年約 55% 的違約機率；他強調這是保險市場的定價，不是他自己的判斷。\n・Chamath｜美國無風險利率（10 年期美債殖利率）持續走高，垃圾債與 CoreWeave 的借款成本都跟著上升。\n・Sacks｜算力需求「爆表」：好幾代前的 H100、A100 仍以溢價出租，折舊比預期慢；他認為 CoreWeave 新專案以資產擔保融資為主，沒有更深層的信用問題。\n・Ben Horowitz｜Anthropic 第三季營收 168 億美元，雖然 Q2 到 Q3 成長明顯放緩，他認為 Anthropic 的 IPO 會沒問題，爭議主要在估值高低。\n・連結｜https://www.youtube.com/watch?v=_b3LfMflIGs\n\n──────────\n【Benjamin Cowen｜Bitcoin Extreme Uncertainty】\n・日期｜10/17\n・來賓｜無（單人節目）\n・Ben｜他認為比特幣現在的不確定性比過去都高，多空兩邊同時在拉扯，而且不會在 8 萬出頭停留太久。\n・Ben｜CPI 與 PPI 都偏熱，10 年期殖利率卻下跌，他認為這是殖利率正在築頂的訊號，市場可能開始更擔心成長。\n・Ben｜金屬通常在殖利率見頂時見底：2022 年與 2018 年黃金都在殖利率築頂期間落底。\n・Ben｜Anthropic 與 OpenAI 的 IPO 都還沒登場，他認為在那之前進入衰退會有點奇怪，衰退比較可能在那之後。\n・連結｜https://www.youtube.com/watch?v=H_JhpNaRPl8\n\n──────────\n以上為節目來賓個人觀點整理",
+  "text": "大佬觀點\n2026.10.24 13:21 (UTC+8)｜近 7 天 10 集\n\n──────────\n【Benjamin Cowen｜Bitcoin: A Precarious Position】\n・日期｜10/24\n・來賓｜無（單人節目）\n・Ben｜他說今年多次提到的 10% 到 20% 股市修正已在發生：羅素 2000 跌約 11.5%、道瓊約 8%、那斯達克約 8%，只有標普 500 只跌約 3%，修正從高風險資產往低風險資產輪動。\n・Ben｜他說比特幣日收盤跌破 50 日均線是對多頭的警告；若 50 日均線在接下來幾天變成壓力，空方論點會加速。\n・Ben｜他說原本預期會讓比特幣在 Q4 下跌的總經條件都發生了：美元今年走出更高的高點與低點，XLE 創歷史新高，WTI 逼近 105 美元、布蘭特約 117 到 118 美元。\n・Ben｜他的空頭劇本：比特幣第二次週收盤跌破 83K、聯準會 10/28 不升息、10/29 PCE 偏熱、10 年期殖利率回到約 5.3%，可能傷害風險資產，股市與比特幣下跌後長天期殖利率在 11 月中見頂、市場打出 Q4 低點。\n・連結｜https://www.youtube.com/watch?v=eN6dpreDIk4\n\n──────────\n【All-In｜AI Cyber Panic, Ken Griffin’s Bubble Warning, The Fall of France?】\n・日期｜10/24\n・來賓｜Ken Griffin（Jason Calacanis 轉述）\n・Ken Griffin（Jason Calacanis 轉述）｜節目引述 Citadel 創辦人 Ken Griffin 說 AI 幾乎確定是泡沫，但泡沫在經濟大轉型中很常見；他看好 AI 長期潛力，擔心的是企業難以把 AI 支出轉成生產力。\n・Chamath｜他估計 1% 的公司占了 90% 的 AI 支出，其中 80% 來自虧損的創投支持新創，資金在小圈子裡循環；AI 要成為可預期的長期獲利驅動，必須擴散到新創生態系之外，而擴散時企業傾向選開源。\n・Friedberg｜他說法國和美國債務占 GDP 都約 120%，法國赤字占 GDP 5.4%、美國 6.2%，法國因經濟成長只有約 0.5% 可能先出事，美國面臨同樣的財政懸崖，法國是西方的領頭指標。\n・Chamath｜節目提到法國 10 年期公債殖利率本週突破 5%、為 2002 年以來最高；他說債券義勇軍可能壓垮法國政府，把長天期利率推高到無法融資債務、迫使經濟重置。\n・連結｜https://www.youtube.com/watch?v=6czo-C3FU7I\n\n──────────\n【a16z｜Amazon CEO Andy Jassy on the Infrastructure the AI Era Needs】\n・日期｜10/23\n・來賓｜Andy Jassy\n・Andy Jassy｜他說 Amazon 2026 年預計資本支出約 2,200 億美元，即使如此仍有相當多需求接不下來；AWS 2026 年產能已賣完，2027 年大致賣完，2028 年也賣掉一大部分。\n・Andy Jassy｜他說金融市場認為全世界沒有足夠的錢來支撐 AI 基建，公司債與股市也出現緊張；但資料中心要提前約 2 年投資、可用約 30 年，伺服器投資前對客戶需求有很好的能見度。\n・Andy Jassy｜他說美國負擔不起不蓋資料中心，否則中國等國家會建立 AI 的領導地位與規範；電價問題的根源是美國長期沒投資電網。\n・連結｜https://www.youtube.com/watch?v=-YMMRQ1qscI\n\n──────────\n【a16z｜The Frontier Ideas a16z Wants to Fund Now | Marc Andreessen, Ben Horowitz & Chris Dixon】\n・日期｜10/23\n・來賓｜Chris Dixon\n・Chris Dixon｜a16z 宣布把加密貨幣基金擴大為 a16z Frontier；他說華爾街正大舉進入加密貨幣（例如代幣化股票），金融科技、華爾街與加密的界線已經模糊。\n・連結｜https://www.youtube.com/watch?v=-9XQMHhpypc\n\n──────────\n【Benjamin Cowen｜Bitcoin Bull Market Support Band】\n・日期｜10/22\n・來賓｜無（單人節目）\n・Ben｜他說比特幣已跌回 82,000 美元下方；7/21、8/21、9/21 都是局部高點，若照這個節奏，下一個高點會落在 10/21 到 11/3 期中選舉之間。\n・Ben｜他說那斯達克已來到牛市支撐帶、標普逼近，以太幣、TOTAL2、TOTAL3、MicroStrategy 都已測過 21 週 EMA，大致只剩比特幣還沒測，顯示比特幣相對強勢。\n・Ben｜他仍認為比特幣主導率很可能上升，因為貨幣政策正回到偏緊，產業內資金從高風險資產流向比特幣，山寨幣對比特幣已失血多年。\n・Ben｜他說技術面偏多，但股市與能源價格的總經環境偏空；期中選舉年 Q4 若修正，通常是股市下跌把比特幣一起帶下去，而不是比特幣本身出問題。\n・連結｜https://www.youtube.com/watch?v=KZ1Jro92t48\n\n──────────\n【All-In｜Arvind Krishna & Nikesh Arora: Quantum Threat, Open vs Frontier AI, AI Cyber Warfare & SaaS Collapse】\n・日期｜10/22\n・來賓｜Arvind Krishna、Nikesh Arora\n・Arvind Krishna｜他說可用的量子電腦時程落在 2028 到 2033 年，取中間約 2030 年，屆時將破解現行加密；後量子加密早已成熟，企業現在就該採用。\n・Nikesh Arora｜他說不能等到 2029、2030 年，企業現在就該把 IT 架構換成抗量子的基礎設施，若時程是 2029–30 年就已經太晚。\n・Arvind Krishna｜他說自己架設中國開源權重模型跑在自有 GPU 上，每百萬 token 成本可從約 20–50 美元降到 1–2 美元，便宜約 40 倍，並能完成約 95% 的工作。\n・Nikesh Arora｜他說資安股近期因 AI Mythos 事件享有較高估值，但這會隨時間回歸合理；資安以外的軟體終值難以判斷，未來幾年 SaaS 會遭到巨大顛覆。\n・連結｜https://www.youtube.com/watch?v=yzk44lz-RGI\n\n──────────\n【Benjamin Cowen｜Bitcoin Holds Above $83k】\n・日期｜10/22\n・來賓｜無（單人節目）\n・Ben｜他說比特幣只出現一次週收盤跌破 83K，這還不夠，要連續多次週收盤跌破才算空方重新掌控，目前仍是多頭主導。\n・Ben｜他說比特幣日線從約 81.7K 的 50 日均線反彈，比現價低約 3,000 美元。\n・Ben｜他說多數山寨幣沒那麼強，比特幣主導率正逼近 61%，他認為主導率很可能會繼續上升。\n・Ben｜他說從聯邦基金利率與 2 年期殖利率的位置看，未來幾週很有機會回到更緊的貨幣政策，這讓比特幣主導率上升最合理。\n・連結｜https://www.youtube.com/watch?v=oYPawyUxnnE\n\n──────────\n【a16z｜Should You Trust ChatGPT With Your Health?】\n・日期｜10/20\n・來賓｜Karan Singhal\n・Karan Singhal｜他說每週有超過 3 億人用 ChatGPT 問健康與保健問題，而且使用量持續快速成長，其中大多數是免費用戶、多數在美國以外。\n・Karan Singhal｜他說醫療業有大量老舊軟體、不會很快都有 MCP 連接器，正因如此，醫療非常適合 AI 代理與電腦操作（computer use）。\n・Karan Singhal｜他說合作醫療體系 AdventHealth 回報，用 AI 處理行政流程後，許多行政工作成本降低約 80%。\n・Karan Singhal｜他說醫療 AI 還沒對美國約 5.3 兆美元的醫療支出產生總體影響，但看好未來幾年慢性病管理、病歷文書與行政後勤等支出整體壓縮，前提是整合流程與規模化部署。\n・連結｜https://www.youtube.com/watch?v=9n0MI4D7TCM\n\n──────────\n【All-In｜Dylan Field: Is AI Replacing Designers?, Design is the New Code & Democratizing Creativity】\n・日期｜10/20\n・來賓｜Dylan Field\n・Dylan Field｜他說隨著寫程式的模型變強，誰都能產生程式碼，軟體的差異化價值往上移到設計、品牌與觀點，所以「設計就是新的程式碼」。\n・Dylan Field｜被問到 Anthropic 推出 Claude Design 是否影響 Figma 生意，他說沒有到明顯的程度。\n・Dylan Field｜他認為不是所有 SaaS 公司都沒事，也不是全都完了；鎖定特定使用者、深耕使用流程的軟體公司仍能長期成長，並舉 Cursor 在大模型實驗室追趕下仍大幅成長為例。\n・Dylan Field｜他說很容易把模型的進步誤當成產品的進步，專業設計工具要花很長時間把工作流程做對。\n・連結｜https://www.youtube.com/watch?v=2Zj6uMv3kTA\n\n──────────\n【Benjamin Cowen｜What will the Federal Reserve Do Next?】\n・日期｜10/20\n・來賓｜無（單人節目）\n・Ben｜他更正先前口誤：市場預估聯準會 10 月會議是八成多機率維持利率不變，而不是八成機率升息。\n・Ben｜他說 2026 年的利率路徑像 2018 年：期中選舉年 9 月升息、選後那次會議暫停，2018 年 12 月又再升息到 2.5%。\n・Ben｜他說 2018 年底聯準會預告 2019 年再升兩次息，結果 2019 年完全沒升、7 月或 9 月就開始降息，所以市場現在預估 2027 年再升兩次未必成真。\n・Ben｜他說進入 2027 年要留意長端殖利率大漲是否開始壓到企業，若出現成長恐慌，市場預期的升息可能根本不會出現。\n・連結｜https://www.youtube.com/watch?v=WAMu9tSOyyY\n\n──────────\n以上為節目來賓個人觀點整理",
   "episodes": [
+    {
+      "show": "Benjamin Cowen",
+      "title": "Bitcoin: A Precarious Position",
+      "guests": [],
+      "date": "2026-10-24",
+      "url": "https://www.youtube.com/watch?v=eN6dpreDIk4",
+      "points": [
+        "Ben：他說今年多次提到的 10% 到 20% 股市修正已在發生：羅素 2000 跌約 11.5%、道瓊約 8%、那斯達克約 8%，只有標普 500 只跌約 3%，修正從高風險資產往低風險資產輪動。",
+        "Ben：他說比特幣日收盤跌破 50 日均線是對多頭的警告；若 50 日均線在接下來幾天變成壓力，空方論點會加速。",
+        "Ben：他說原本預期會讓比特幣在 Q4 下跌的總經條件都發生了：美元今年走出更高的高點與低點，XLE 創歷史新高，WTI 逼近 105 美元、布蘭特約 117 到 118 美元。",
+        "Ben：他的空頭劇本：比特幣第二次週收盤跌破 83K、聯準會 10/28 不升息、10/29 PCE 偏熱、10 年期殖利率回到約 5.3%，可能傷害風險資產，股市與比特幣下跌後長天期殖利率在 11 月中見頂、市場打出 Q4 低點。"
+      ]
+    },
+    {
+      "show": "All-In",
+      "title": "AI Cyber Panic, Ken Griffin’s Bubble Warning, The Fall of France?",
+      "guests": [
+        "Ken Griffin（Jason Calacanis 轉述）"
+      ],
+      "date": "2026-10-24",
+      "url": "https://www.youtube.com/watch?v=6czo-C3FU7I",
+      "points": [
+        "Ken Griffin（Jason Calacanis 轉述）：節目引述 Citadel 創辦人 Ken Griffin 說 AI 幾乎確定是泡沫，但泡沫在經濟大轉型中很常見；他看好 AI 長期潛力，擔心的是企業難以把 AI 支出轉成生產力。",
+        "Chamath：他估計 1% 的公司占了 90% 的 AI 支出，其中 80% 來自虧損的創投支持新創，資金在小圈子裡循環；AI 要成為可預期的長期獲利驅動，必須擴散到新創生態系之外，而擴散時企業傾向選開源。",
+        "Friedberg：他說法國和美國債務占 GDP 都約 120%，法國赤字占 GDP 5.4%、美國 6.2%，法國因經濟成長只有約 0.5% 可能先出事，美國面臨同樣的財政懸崖，法國是西方的領頭指標。",
+        "Chamath：節目提到法國 10 年期公債殖利率本週突破 5%、為 2002 年以來最高；他說債券義勇軍可能壓垮法國政府，把長天期利率推高到無法融資債務、迫使經濟重置。"
+      ]
+    },
+    {
+      "show": "a16z",
+      "title": "Amazon CEO Andy Jassy on the Infrastructure the AI Era Needs",
+      "guests": [
+        "Andy Jassy"
+      ],
+      "date": "2026-10-23",
+      "url": "https://www.youtube.com/watch?v=-YMMRQ1qscI",
+      "points": [
+        "Andy Jassy：他說 Amazon 2026 年預計資本支出約 2,200 億美元，即使如此仍有相當多需求接不下來；AWS 2026 年產能已賣完，2027 年大致賣完，2028 年也賣掉一大部分。",
+        "Andy Jassy：他說金融市場認為全世界沒有足夠的錢來支撐 AI 基建，公司債與股市也出現緊張；但資料中心要提前約 2 年投資、可用約 30 年，伺服器投資前對客戶需求有很好的能見度。",
+        "Andy Jassy：他說美國負擔不起不蓋資料中心，否則中國等國家會建立 AI 的領導地位與規範；電價問題的根源是美國長期沒投資電網。"
+      ]
+    },
+    {
+      "show": "a16z",
+      "title": "The Frontier Ideas a16z Wants to Fund Now | Marc Andreessen, Ben Horowitz & Chris Dixon",
+      "guests": [
+        "Chris Dixon"
+      ],
+      "date": "2026-10-23",
+      "url": "https://www.youtube.com/watch?v=-9XQMHhpypc",
+      "points": [
+        "Chris Dixon：a16z 宣布把加密貨幣基金擴大為 a16z Frontier；他說華爾街正大舉進入加密貨幣（例如代幣化股票），金融科技、華爾街與加密的界線已經模糊。"
+      ]
+    },
     {
       "show": "Benjamin Cowen",
       "title": "Bitcoin Bull Market Support Band",
@@ -86,63 +140,6 @@
         "Ben：他說 2026 年的利率路徑像 2018 年：期中選舉年 9 月升息、選後那次會議暫停，2018 年 12 月又再升息到 2.5%。",
         "Ben：他說 2018 年底聯準會預告 2019 年再升兩次息，結果 2019 年完全沒升、7 月或 9 月就開始降息，所以市場現在預估 2027 年再升兩次未必成真。",
         "Ben：他說進入 2027 年要留意長端殖利率大漲是否開始壓到企業，若出現成長恐慌，市場預期的升息可能根本不會出現。"
-      ]
-    },
-    {
-      "show": "a16z",
-      "title": "Why a $1M Startup Wasn’t Worth Building in the Age of AI",
-      "guests": [
-        "Jean-Denis Greze",
-        "Alex Rampell"
-      ],
-      "date": "2026-10-19",
-      "url": "https://www.youtube.com/watch?v=o_5f4N6Nq80",
-      "points": [
-        "Jean-Denis Greze：他說 SMB 報稅產品第一年營收略低於 100 萬、第二年目標約 250–300 萬，在 AI 之前會是合理事業，但在 AI 之後已不可能做成風險投資規模的公司。",
-        "Jean-Denis Greze：他認為更關鍵的是，既有業者能用同一套技術更快為既有客戶自動化報稅，會比新創搶下市占還快。",
-        "Alex Rampell：他說整體 agent 流量已大幅超過人類流量，並提到 Amazon 因廣告商業模式而對 agent 採較對抗的態度。",
-        "Jean-Denis Greze：他說若自己是擁有約 700–800 億美元年廣告營收的 Amazon，不該封鎖 agents；若硬扛未來，Amazon 可能失去一大塊廣告業務。"
-      ]
-    },
-    {
-      "show": "Benjamin Cowen",
-      "title": "Has the Q4 Equity Correction Finally Arrived?",
-      "guests": [],
-      "date": "2026-10-18",
-      "url": "https://www.youtube.com/watch?v=VA_Qr4-s994",
-      "points": [
-        "Ben：標普 500 離高點只跌約 2%，但他說如果第四季真有修正，就會像現在這樣從其他市場的弱勢開始，羅素 2000 已跌約 11%、那斯達克約 7%。",
-        "Ben：他認為聯準會 10 月很可能不升息（FedWatch 約 84.5%），長端殖利率可能在期中選舉前再彈一次，就像 2018 年 9 月升息、跳過選前會議、12 月再升息的路徑。",
-        "Ben：他說油價若沒人處理會繼續上漲，直到中東情勢改變，這是第四季股市修正最完美的劇本。",
-        "Ben：他說歷史上讓比特幣在第四季回落的是股市修正，標普修正可能讓比特幣在正要突破時停下來，就像上輪比特幣熊市讓山寨季沒來。"
-      ]
-    },
-    {
-      "show": "All-In",
-      "title": "CoreWeave Crash, AI Trade Cracks, Anthropic IPO Red Flags, Bill Gates the Doomer",
-      "guests": [
-        "Ben Horowitz"
-      ],
-      "date": "2026-10-17",
-      "url": "https://www.youtube.com/watch?v=_b3LfMflIGs",
-      "points": [
-        "Chamath：CoreWeave 的信用違約交換（CDS）本週升到約 953 個基點，換算約每年 16%、五年約 55% 的違約機率；他強調這是保險市場的定價，不是他自己的判斷。",
-        "Chamath：美國無風險利率（10 年期美債殖利率）持續走高，垃圾債與 CoreWeave 的借款成本都跟著上升。",
-        "Sacks：算力需求「爆表」：好幾代前的 H100、A100 仍以溢價出租，折舊比預期慢；他認為 CoreWeave 新專案以資產擔保融資為主，沒有更深層的信用問題。",
-        "Ben Horowitz：Anthropic 第三季營收 168 億美元，雖然 Q2 到 Q3 成長明顯放緩，他認為 Anthropic 的 IPO 會沒問題，爭議主要在估值高低。"
-      ]
-    },
-    {
-      "show": "Benjamin Cowen",
-      "title": "Bitcoin Extreme Uncertainty",
-      "guests": [],
-      "date": "2026-10-17",
-      "url": "https://www.youtube.com/watch?v=H_JhpNaRPl8",
-      "points": [
-        "Ben：他認為比特幣現在的不確定性比過去都高，多空兩邊同時在拉扯，而且不會在 8 萬出頭停留太久。",
-        "Ben：CPI 與 PPI 都偏熱，10 年期殖利率卻下跌，他認為這是殖利率正在築頂的訊號，市場可能開始更擔心成長。",
-        "Ben：金屬通常在殖利率見頂時見底：2022 年與 2018 年黃金都在殖利率築頂期間落底。",
-        "Ben：Anthropic 與 OpenAI 的 IPO 都還沒登場，他認為在那之前進入衰退會有點奇怪，衰退比較可能在那之後。"
       ]
     }
   ],
