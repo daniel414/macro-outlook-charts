@@ -230,7 +230,7 @@ def rvw_line():
 def section(price=None):
     r = analyse(price); px = r["price"]
     w = _CACHE["w"]; d = _CACHE["d"]; h4 = _CACHE["h4"]
-    L = [TITLE + "（規則未回測）", "大趨勢"]
+    L = [TITLE, "大趨勢"]
     try:
         bt = big_trend(r, w, d)
         L.append(f"・方向：{bt['dirn']}（評分 {bt['score']:+d}／{bt['n']} 項）")
