@@ -21,6 +21,14 @@ for f in $SYNC $LOCALONLY; do
     [ "$(sha1sum <"$f")" = "$(sha1sum <"$R/$f")" ] || diff+=("$f")
   fi
 done
+# cryptochan on-chain signals (onchain/, added 2026-10-24): restore only if missing
+mkdir -p onchain/cryptochan
+for f in cryptochan_signals.py cryptochan/LIVE.json; do
+  if [ ! -f "onchain/$f" ]; then
+    if [ -f "$R/onchain/$f" ]; then cp "$R/onchain/$f" "onchain/$f" && fixed+=("restored:onchain/$f") || w "restore onchain/$f failed"
+    else w "onchain/$f missing and not in repo"; fi
+  fi
+done
 # onchain_latest.json (STH on-chain data used by Binance Square posts and onchain analysis): restore/refresh from repo btc/
 mkdir -p out/repo_state; OJ=out/repo_state/onchain_latest.json
 if [ -f "$TMP/btc/onchain_latest.json" ]; then
