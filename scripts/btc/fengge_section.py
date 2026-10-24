@@ -6,7 +6,7 @@ Rules: 1) trend filter = price vs 50-week MA + daily swing structure (HH/HL or L
 4) half off at T1, rest stop to entry. 5) counter-trend shorts down-weighted.
 Free public data: OKX BTC-USDT candles (1Wutc/1Dutc/4H/1H). Stdlib only.
 Usage: fengge_section.py [--price 80780] [--json]  -> prints the section, or nothing on failure (exit 0)."""
-import json, re, sys, urllib.request
+import json, os, re, sys, urllib.request
 _CACHE = {}
 TITLE = "【交易模型】"
 UA = {"User-Agent": "btc-fengge/1.0"}
@@ -281,13 +281,46 @@ def zones(cands, px, below):
     for z in out: z["lo"], z["hi"] = min(z["lv"]), max(z["lv"])
     return out
 def zs(z): return n0(z["lo"]) if z["hi"] - z["lo"] < 50 else f"{n0(z['lo'])}–{n0(z['hi'])}"
-# 長期推測參數（人工維護，來源：交易員公開觀點與 Daniel 提供的長期路徑圖；輸出不出現人名）
+# 長期推測參數（人工維護，來源：交易員公開觀點與 Daniel 提供的長期路徑圖）
 LONG_VIEW = dict(low=57700, dd_min=0.10, dd_max=0.15, ath=124672, ath_window="2027 年 4 月底至 8 月初",
                  top="160–180K（長期上升趨勢線）", next_bottom="100K 以上",
                  path="90–100K 區間震盪 → 113K 附近突破後回踩 → 沿長期上升趨勢線上看 160–180K")
+
+# Daniel 偏好分析師觀點（人工維護；鋒哥 10/16、10/24 影片 BTC 走勢段落，@KillaXBT 10/4 推文）
+FAV_VIEWS = {
+    "short": [("鋒哥", "80K 是短線關鍵，失守先看 77.7–76.3K；美國期中選舉（約 11/3）前偏橫盤震盪")],
+    "mid":   [("鋒哥", "從 80K 看下跌空間不到 10%，極限 75–77K（50 週均線、週線 Vegas 通道）；跌回 70K 以下轉弱")],
+    "long":  [("鋒哥", "57.7K 為本輪低點，目標回前高約 130K；失效：跌回 70K，再破 60K 則反轉失敗"),
+              ("@KillaXBT", "2027 年 4 月底至 8 月初回前高，本輪週期可能只有約兩年")],
+}
+_LONG_KW = re.compile(r"本輪|HTF|兆|牛市|下輪|202[7-9]|中位數|下個低點|1[0-9]{2}(?:\.\d)?K|1[0-9]{2},\d{3}")
+_MID_KW = re.compile(r"週|區間|[Ss]top [Hh]unt|月|50D")
+def kol_layers():
+    """Tracked analysts' levels from kol/latest_view.json split into short/mid/long (keyword rule)."""
+    out = {"short": [], "mid": [], "long": []}
+    try:
+        d = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "kol/latest_view.json")))
+    except Exception:
+        return out
+    skip = {"traderfengge"}   # 鋒哥 已在 FAV_VIEWS
+    for a in d.get("accounts", []):
+        lv = (a.get("levels") or "").strip()
+        if a.get("stance") == "未談BTC" or a["handle"] in skip or lv in ("", "-"): continue
+        for seg in [x.strip() for x in lv.split("｜") if x.strip()]:
+            k = "long" if _LONG_KW.search(seg) else "mid" if _MID_KW.search(seg) else "short"
+            out[k].append((a["handle"], a.get("stance", ""), seg))
+    return out
+def views_block(layer, kl, n=3):
+    L = [f"・{who}：{t}" for who, t in FAV_VIEWS.get(layer, [])]
+    seen = {}
+    for h, st, seg in kl.get(layer, []):
+        seen.setdefault(h, (st, []))[1].append(seg)
+    for h, (st, segs) in list(seen.items())[:n]:
+        L.append(f"・@{h}（{st}）：{'；'.join(segs[:2])}")
+    return ["・分析師觀點："] + ["  " + x for x in L] if L else []
 def forecast(price=None):
     r = analyse(price); px = r["price"]; w, d, h4 = _CACHE["w"], _CACHE["d"], _CACHE["h4"]
-    lv = onchain_levels()
+    lv = onchain_levels(); kl = kol_layers()
     import datetime as dt
     tw = dt.datetime.now(dt.timezone(dt.timedelta(hours=8)))
     L = ["BTC 走勢預測", f"{tw.strftime('%Y.%m.%d %H:%M')} (UTC+8)｜BTC {n0(px)}"]
@@ -304,6 +337,7 @@ def forecast(price=None):
     rv = rvw_line()
     if rv: L.append(rv)
     L += short_lines(r)
+    L += views_block("short", kl)
     # ---- 中期
     L += ["", "──────────", "【中期】數週：掃單與流動性價位"]
     DH, DL = pivots(d, 3)
@@ -329,6 +363,7 @@ def forecast(price=None):
         dirn = "先向下掃流動性再回升" if r["price"] < (rs.get("lo") or 0) else "區間內來回掃單"
         L.insert(L.index("【中期】數週：掃單與流動性價位") + 1, f"・方向：{dirn}｜目標 {'、'.join(zs(z) for z in zd[:2])}｜失效：日線站回 {zs(zu[0])}，改看 {zs(zu[1]) if len(zu) > 1 else '上方前高'}")
     L.append("・清算密集區：無可靠免費資料，未列入")
+    L += views_block("mid", kl)
     # ---- 長期
     L += ["", "──────────", "【長期】週期"]
     if bt:
@@ -366,6 +401,7 @@ def forecast(price=None):
     L.append(f"・@KillaXBT 猜測路徑：若週期縮短，{LT["ath_window"]}回測前高 {n0(LT['ath'])}")
     L.append(f"・路徑：{LT['path']}")
     L.append(f"・下個週期底預估在 {LT['next_bottom']}")
+    L += views_block("long", kl)
     return "\n".join(L)
 if __name__ == "__main__":
     try:

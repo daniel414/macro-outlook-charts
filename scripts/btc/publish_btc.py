@@ -105,7 +105,7 @@ def kfmt(t):
     t = re.sub(r"(\d+(?:\.\d+)?)K", lambda m: k(m.group(1)), t)
     return re.sub(r"(?<![\d,.])(\d{5,})(?![\d.])", lambda m: f"{int(m.group(1)):,}", t)
 def kol_text():
-    """/btckol text: title+time, ━ blocks: 整體立場 / 共同關注價位 / 主要分歧 / 各分析師 (one line each)."""
+    """/btckol text: title+time, ━ blocks: 整體立場 / 共同關注價位 / 主要分歧 / 各分析師 (觀點+短線+長期 per analyst)."""
     try:
         d = json.load(open(os.path.join(HERE, "kol/latest_view.json"))); acc = d["accounts"]
     except Exception:
@@ -130,9 +130,18 @@ def kol_text():
     lab = {"偏多": "看多", "偏空": "看空", "中性": "中性", "未談BTC": "未談"}
     order = {"偏多": 0, "中性": 1, "偏空": 2, "未談BTC": 3}
     L += ["", KOL_DIV, "【各分析師】"]
+    LKW = re.compile(r"本輪|HTF|兆|牛市|下輪|202[7-9]|中位數|下個低點|1[0-9]{2}(?:\.\d)?K|1[0-9]{2},\d{3}")
+    quiet = []
     for a in sorted(acc, key=lambda a: order.get(a.get("stance"), 9)):
+        if a.get("stance") == "未談BTC": quiet.append(a["handle"]); continue
         r = kfmt(a.get("reason", "")).split("；")[0].rstrip("。")
-        L.append(f"・{a['handle']}｜{lab.get(a.get('stance'), a.get('stance', '-'))}｜{r}")
+        segs = [x.strip() for x in (a.get("levels") or "").split("｜") if x.strip() and x.strip() != "-"]
+        lo = [kfmt(x) for x in segs if LKW.search(x)]; sh = [kfmt(x) for x in segs if not LKW.search(x)]
+        L.append(f"・{a['handle']}｜{lab.get(a.get('stance'), a.get('stance', '-'))}" + (f"（{a['latest_post'][5:].replace('-', '/')}）" if a.get("latest_post") else ""))
+        if r: L.append(f"  觀點：{r}")
+        if sh: L.append("  短線：" + "；".join(sh))
+        if lo: L.append("  長期：" + "；".join(lo))
+    if quiet: L.append("・近期未談 BTC：" + "、".join(quiet))
     try:   # CryptoQuant top-5 BTC analysts (cq_consensus.py --kol, run as a script, reads the daily cache); optional
         cq = subprocess.run([sys.executable, os.path.join(HERE, "cq_consensus.py"), "--kol"], cwd=HERE, capture_output=True, text=True, timeout=90).stdout.strip()
         if cq.startswith("【CryptoQuant"): L += ["", KOL_DIV] + cq.splitlines()
