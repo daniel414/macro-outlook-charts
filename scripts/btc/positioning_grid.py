@@ -7,7 +7,7 @@
 Panels (BTC price on each; L/S ratios shown as long−short deltas in %, Daniel 2026-10-14): 1 多空差值（全部帳戶）OKX+Gate · 2 未平倉量 OKX+Gate ·
 3 OKX 大戶多空比 (account/position) · 4 Gate/Binance 大戶多空比 · 5 巨鯨 vs 散戶差值 ·
 6 Bitfinex 槓桿多空 · 7 Ahr999 (daily, computed from FRED CBBTCUSD + Kraken) · 8 資金費率.
-Data: data/positioning2.db (posdata.py, run every 15 min by run_collect.sh); OKX funding from sentiment.db.
+Data: data/positioning2.db (posdata.py, run every 15 min by run_collect.sh); OKX funding in the same db (positioning table).
 Freshness (2026-10-17, after the dead collector left OKX funding 46h stale): every run refreshes OKX realized funding live
 (btcsent.positioning.update, 1 page, OKX public funding-rate-history); OI/funding series older than their bar + 2h (
 OKX 8h funding 9h) trigger a live posdata refetch, and anything still stale is output as None, listed in POSGRID_JSON
@@ -27,7 +27,7 @@ from matplotlib.ticker import FuncFormatter, MaxNLocator
 from PIL import Image
 from btcsent.common import connect, OUT_DIR
 from btcsent.price import bucket_start, get_klines
-from btcsent.positioning import load as load_okx_pos
+from btcsent.positioning import load as load_okx_pos, pos_con
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 PDB = os.path.join(ROOT, "data", "positioning2.db"); MDB = os.path.join(ROOT, "data", "macro.db")
@@ -81,7 +81,7 @@ def freshen(tf, fails):
     """Refresh OKX funding live every run; refetch any OI/funding source whose newest row is stale (free public APIs)."""
     try:
         from btcsent.positioning import update as okx_update
-        okx_update(connect(), max_pages=1)
+        okx_update(pos_con(), max_pages=1)
     except Exception as e:
         fails.append(f"okx_funding_refresh: {e!r}")
     now = time.time(); con = sqlite3.connect(PDB, timeout=60)
@@ -398,7 +398,7 @@ def main():
 
     # 8 funding
     ax = axs[7]
-    fo = load_okx_pos(connect(), "funding_realized", "8h", start_b, end_b) * 100
+    fo = load_okx_pos(pos_con(), "funding_realized", "8h", start_b, end_b) * 100
     fg = S("gate", "funding") * 100
     if not fo.empty:
         ax.bar(num(fo.index), fo.values, width=8 / 24 * 0.8, align="edge", color=np.where(fo.values >= 0, TH["up"], TH["down"]), alpha=0.85, lw=0)

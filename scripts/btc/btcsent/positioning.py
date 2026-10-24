@@ -4,7 +4,7 @@
                      periods 5m / 1H / 4H / 1D. OKX serves at most 1440 bars per period (1D: since 2024-01-01).
   funding_realized : realized 8h funding rate of BTC-USDT-SWAP (OKX history endpoint serves ~3 months).
 
-Stored in data/sentiment.db table `positioning` (separate from the Reddit sentiment `posts`).
+Stored in data/positioning2.db table `positioning` (moved out of sentiment.db 2026-10-24; open with pos_con()).
 Research (experiments P1/P1b, 2026-10-09): the 4H L/S account ratio is LOWER at swing highs and HIGHER at swing
 lows even after removing price (BH-significant), i.e. it marks swings COINCIDENTALLY; it has no next-bar lead and
 no out-of-sample contrarian-zone edge -> shown as context, never as a signal, no zones.
@@ -18,6 +18,15 @@ SCHEMA = """CREATE TABLE IF NOT EXISTS positioning (
     ts INTEGER NOT NULL,          -- unix seconds UTC as reported by OKX
     value REAL, fetched_utc INTEGER,
     PRIMARY KEY (source, inst, metric, period, ts));"""
+
+
+def pos_con():
+    """Connection to data/positioning2.db (holds the `positioning` table since 2026-10-24)."""
+    import os, sqlite3
+    p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "positioning2.db")
+    con = sqlite3.connect(p, timeout=120); con.execute("PRAGMA busy_timeout=120000")
+    con.executescript(SCHEMA)
+    return con
 
 
 def cfg():

@@ -3,7 +3,7 @@
 
 Runs only when Bitcoin Analysis (Grok Bot, box) has not published btc/latest.json recently, so the bot stays the
 primary publisher and nothing conflicts. It rebuilds the data the box collector keeps (data/positioning2.db,
-data/sentiment.db positioning, data/macro.db) from the same free, keyless public APIs with the box's own scripts
+data/macro.db; OKX funding/positioning lives in positioning2.db) from the same free, keyless public APIs with the box's own scripts
 (posdata.py, btcsent/positioning.py, positioning_grid.py: vendored unchanged), then writes the same files the bot writes.
 
 AI-written parts (lead_text, the 散戶：/大戶：/解讀： sentences) are never invented: they are carried over from the last
@@ -77,7 +77,7 @@ def okx_recent(con, pages):
 
 def bootstrap():
     data = os.path.join(HERE, "data"); os.makedirs(data, exist_ok=True)
-    for f in ("positioning2.db", "macro.db", "sentiment.db"):
+    for f in ("positioning2.db", "macro.db"):
         p = os.path.join(data, f)
         if os.path.exists(p): os.remove(p)
     shutil.copy(os.path.join(HERE, "seed", "positioning2.db"), os.path.join(data, "positioning2.db"))  # Kraken daily history (box copy)
@@ -97,9 +97,9 @@ def bootstrap():
         except Exception as e:
             fails.append(k); log(f"bootstrap {k} FAILED: {e!r}")
             if k == "binance_www": log("bootstrap binance_www FALLBACK: using data.binance.vision daily dumps only (1-2 day lag); /btc shows 截至")
-    from btcsent import positioning as BP, common as BC
+    from btcsent import positioning as BP
     t = time.time()
-    try: log(f"bootstrap okx funding/positioning: {BP.update(BC.connect())} rows in {time.time()-t:.1f}s")
+    try: log(f"bootstrap okx funding/positioning: {BP.update(BP.pos_con())} rows in {time.time()-t:.1f}s")
     except Exception as e: fails.append("okx_funding"); log(f"bootstrap okx funding FAILED: {e!r}")
     return fails
 
