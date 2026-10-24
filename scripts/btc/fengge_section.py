@@ -360,8 +360,9 @@ def forecast(price=None):
     LT = LONG_VIEW
     dlo, dhi = px * (1 - LT["dd_max"]), px * (1 - LT["dd_min"])
     L += ["", "──────────", "【長期大方向推測】"]
-    L.append(f"・方向：偏多，本輪熊市低點大概率已出現｜目標 前高 {n0(LT['ath'])}，再上 {LT['top']}｜失效：週線收盤跌破 {n0(LT['low'])}")
-    L.append(f"・本輪低點約 {LT['low'] / 1000:.1f}K，最大再下探約 -{LT['dd_min'] * 100:.0f}~{LT['dd_max'] * 100:.0f}%（約 {dlo / 1000:.0f}–{dhi / 1000:.0f}K），仍在低點之上")
+    L.append(f"・方向：偏多，本輪熊市低點大概率已出現｜目標 前高 {n0(LT['ath'])}，再上 {LT['top']}｜失效：跌回 70K 以下（再破 60K 則反轉失敗）")
+    L.append(f"・本輪低點約 {LT['low'] / 1000:.1f}K；自 6 萬起算最大再下探 -10~15%（約 53–54K），此區已大概率不會到")
+    L.append("・從 8 萬看下跌空間不到 10%，極限 75–77K")
     L.append(f"・@KillaXBT 猜測路徑：若週期縮短，{LT["ath_window"]}回測前高 {n0(LT['ath'])}")
     L.append(f"・路徑：{LT['path']}")
     L.append(f"・下個週期底預估在 {LT['next_bottom']}")
