@@ -251,10 +251,127 @@ def section(price=None):
     L += short_lines(r)
     L.append("・規則樣本小：實單 15 筆，各型態 1–4 筆；逆勢空單止損命中率高，已降權")
     return "\n".join(L), r
+# ---------------- 走勢預測 (forecast_text, Daniel 2026-10-24 16:58) ----------------
+def _num(pat, txt):
+    m = re.search(pat, txt or "")
+    return float(m.group(1).replace(",", "")) if m else None
+def onchain_levels():
+    oc = _rd("out/repo_state/onchain_latest.json") or {}
+    t = oc.get("text", ""); cur = ((oc.get("cryptochan") or {}).get("current")) or {}
+    lv = dict(tmm=cur.get("tmm") or _num(r"True Market Mean (\d{2,3},\d{3})(?![\d.])", t), sth=cur.get("sthrp") or _num(r"STH 成本 (\d{2,3},\d{3})(?![\d.])", t),
+              hot=_num(r"偏熱線 (\d{2,3},\d{3})(?![\d.])", t), over=_num(r"過熱線 (\d{2,3},\d{3})(?![\d.])", t), cool=_num(r"冷卻線 (\d{2,3},\d{3})(?![\d.])", t),
+              oversold=_num(r"超賣線 (\d{2,3},\d{3})(?![\d.])", t), cyc_low=_num(r"週期低點 (\d{2,3},\d{3})(?![\d.])", t), lth=_num(r"LTH 成本 (\d{2,3},\d{3})(?![\d.])", t),
+              sth_mvrv=_num(r"STH MVRV｜([\d.]+)", t), lth_z=_num(r"MVRV LTH Z｜([+-]?[\d.]+)", t), nupl=_num(r"NUPL｜([\d.]+)", t))
+    m = re.search(r"這輪低點是 (\d{4}/\d+/\d+) 的 ([\d,]+)", t); lv["low_date"] = m.group(1) if m else None
+    m = re.search(r"週期位置：([^，。\n]+)", t); lv["cycle"] = m.group(1) if m else None
+    lv["sth30"] = "這輪 " in t and "已經做到" in t
+    m = re.search(r"從 (\d+/\d+) 起價格都在其上，約 (\d+) 週", t); lv["tmm_weeks"] = m.group(2) if m else None
+    sig = None
+    if cur: sig = sum([cur.get("ratio", 9) < cur.get("ratio60", 0), cur.get("sthrp", 0) > cur.get("ma200", 9e9), cur.get("rev30", 0) > cur.get("rev365", 9e9)])
+    lv["sig"] = sig
+    return lv
+def zones(cands, px, below):
+    """Cluster labelled levels (within 1.2%) on one side of price, nearest first."""
+    c = sorted([(p, n) for p, n in cands if p and ((p < px * 0.995) if below else (p > px * 1.005))], key=lambda x: -x[0] if below else x[0])
+    out = []
+    for p, n in c:
+        if out and abs(p - out[-1]["ref"]) / out[-1]["ref"] <= 0.012:
+            out[-1]["lv"].append(p); out[-1]["names"].append(n)
+        else: out.append(dict(ref=p, lv=[p], names=[n]))
+    for z in out: z["lo"], z["hi"] = min(z["lv"]), max(z["lv"])
+    return out
+def zs(z): return n0(z["lo"]) if z["hi"] - z["lo"] < 50 else f"{n0(z['lo'])}–{n0(z['hi'])}"
+# 長期推測參數（人工維護，來源：交易員公開觀點與 Daniel 提供的長期路徑圖；輸出不出現人名）
+LONG_VIEW = dict(low=57700, dd_min=0.10, dd_max=0.15, ath=124672, ath_window="2027 年 4 月底至 8 月初",
+                 top="160–180K（長期上升趨勢線）", next_bottom="100K 以上",
+                 path="90–100K 區間震盪 → 113K 附近突破後回踩 → 沿長期上升趨勢線上看 160–180K")
+def forecast(price=None):
+    r = analyse(price); px = r["price"]; w, d, h4 = _CACHE["w"], _CACHE["d"], _CACHE["h4"]
+    lv = onchain_levels()
+    import datetime as dt
+    tw = dt.datetime.now(dt.timezone(dt.timedelta(hours=8)))
+    L = ["BTC 走勢預測（規則未回測）", f"{tw.strftime('%Y.%m.%d %H:%M')} (UTC+8)｜BTC {n0(px)}"]
+    bt = None
+    try: bt = big_trend(r, w, d)
+    except Exception as e: print("big trend skipped:", e, file=sys.stderr)
+    # ---- 短線
+    L += ["", "──────────", "【短線】數小時到數天"]
+    try:
+        sb = short_bias(r, d, h4)
+        L.append(f"・傾向：{sb['bias']}｜下一目標 {'、'.join(n0(x) for x in sb['targets'])}")
+        L.append(f"・失效：{sb['fail']}")
+    except Exception as e: print("short bias skipped:", e, file=sys.stderr)
+    rv = rvw_line()
+    if rv: L.append(rv)
+    L += short_lines(r)
+    # ---- 中期
+    L += ["", "──────────", "【中期】數週：掃單與流動性價位"]
+    DH, DL = pivots(d, 3)
+    rs = (_rd("out/range_state.json") or {}).get("active") or {}
+    dn = [(p, "前低") for _, p in DL[-8:]] + [(r["ma50w"], "50 週均線"), (lv["tmm"], "鏈上市場均價"), (lv["sth"], "短期持有者成本"), (lv["cool"], "鏈上冷卻線")]
+    dn += [(k * 1000.0, "整數關口") for k in range(int(px // 5000) * 5, int(px // 5000) * 5 - 16, -5)]
+    up = [(p, "前高") for _, p in DH[-8:]] + [(rs.get("lo"), "盤整區下緣"), (rs.get("hi"), "盤整區上緣"), (lv["hot"], "鏈上偏熱線")]
+    try:
+        o = [x for x in d if dt.datetime.fromtimestamp(x[0] / 1000, dt.timezone.utc).strftime("%m-%d") == "01-01" and dt.datetime.fromtimestamp(x[0] / 1000, dt.timezone.utc).year == tw.year]
+        if o: up.append((o[0][1], "今年開盤價"))
+    except Exception: pass
+    up += [(k * 1000.0, "整數關口") for k in range(int(px // 5000) * 5 + 5, int(px // 5000) * 5 + 16, 5)]
+    zda = [z for z in zones(dn, px, True) if z["ref"] > px * 0.8]; zd = zda[:3]
+    zu = [z for z in zones(up, px, False) if z["ref"] < px * 1.2][:3]
+    for i, z in enumerate(zd):
+        back = zd[i - 1] if i > 0 else (zu[0] if zu else None)
+        nxt = zda[i + 1] if i + 1 < len(zda) else None
+        L.append(f"・下方掃單 {zs(z)}（{'、'.join(dict.fromkeys(z['names']))}）：快速跌破後 4H 收回，視為掃完停損，回看 {zs(back) if back else '上方壓力'}；日線收在下方則續看 {zs(nxt) if nxt else '更低支撐'}")
+    for i, z in enumerate(zu[:2]):
+        nxt = zu[i + 1] if i + 1 < len(zu) else None
+        L.append(f"・上方掃單 {zs(z)}（{'、'.join(dict.fromkeys(z['names']))}）：插針站上後收回，視為掃空單後回落；日線站穩則看 {zs(nxt) if nxt else '更高壓力'}")
+    if zd and zu:
+        dirn = "先向下掃流動性再回升" if r["price"] < (rs.get("lo") or 0) else "區間內來回掃單"
+        L.insert(L.index("【中期】數週：掃單與流動性價位") + 1, f"・方向：{dirn}｜目標 {'、'.join(zs(z) for z in zd[:2])}｜失效：日線站回 {zs(zu[0])}，改看 {zs(zu[1]) if len(zu) > 1 else '上方前高'}")
+    L.append("・清算密集區：無可靠免費資料，未列入")
+    # ---- 長期
+    L += ["", "──────────", "【長期】週期"]
+    if bt:
+        L.append(f"・大趨勢：{bt['dirn']}（評分 {bt['score']:+d}／{bt['n']} 項）")
+        L.append("・依據：" + "、".join(t for _, _, t in bt["items"]))
+    WH, WL = pivots(w, 2)
+    wk_up = len(WH) >= 2 and len(WL) >= 2 and WL[-1][1] > WL[-2][1]
+    ev = []
+    if lv["cyc_low"]: ev.append(f"週期低點 {n0(lv['cyc_low'])}（{lv['low_date'] or '?'}）後沒有再破")
+    if lv["sth"] and px > lv["sth"]: ev.append("價格在短期持有者成本之上" + ("並守住 30 天" if lv["sth30"] else ""))
+    if lv["tmm"] and px > lv["tmm"]: ev.append("在鏈上市場均價之上" + (f"約 {lv['tmm_weeks']} 週" if lv["tmm_weeks"] else ""))
+    if wk_up: ev.append("週線低點墊高")
+    if lv["sig"] is not None: ev.append(f"鏈上訊號 {lv['sig']}/3 偏多")
+    con = []
+    if lv["lth_z"] is not None: con.append(f"長期持有者 MVRV Z {lv['lth_z']:+.2f} 仍低於長期均值")
+    if lv["nupl"] is not None: con.append(f"NUPL {lv['nupl']:.2f}，這輪底部比前三輪淺很多")
+    k = len(ev) - (0 if (lv["sth"] and px > lv["sth"]) else 2)
+    verdict = "熊市低點大概率已經出現" if k >= 4 else "熊市低點可能已出現，但還不能確認" if k >= 2 else "熊市低點尚未確認"
+    L.append(f"・判斷：{verdict}" + (f"，低點 {n0(lv['cyc_low'])}（{lv['low_date']}）" if lv["cyc_low"] else "") + (f"；鏈上週期為{lv['cycle']}" if lv["cycle"] else ""))
+    if ev: L.append("・支持：" + "、".join(ev))
+    if con: L.append("・疑點：" + "、".join(con))
+    flo = [x for x in (lv["sth"], lv["tmm"], r["ma50w"]) if x]
+    if flo:
+        a, b = min(flo), max(flo)
+        tg = "、".join(n0(x) for x in sorted(x for x in (lv["hot"], next((p for p, n in up if n == "今年開盤價"), None), lv["over"]) if x and x > px))
+        L.append(f"・路徑一：回測 {n0(a)}–{n0(b)}（短期持有者成本／鏈上市場均價／50 週均線）守住，築底後再上" + (f"，目標 {tg}" if tg else ""))
+        dd = "、".join(n0(x) for x in (lv["cool"], lv["oversold"], lv["cyc_low"]) if x)
+        L.append(f"・路徑二：週線收盤跌破 {n0(a)}，大結構轉弱，二次探底" + (f"，依序看 {dd}" if dd else ""))
+    LT = LONG_VIEW
+    dlo, dhi = px * (1 - LT["dd_max"]), px * (1 - LT["dd_min"])
+    L += ["", "──────────", "【長期大方向推測】（推測，規則未回測）"]
+    L.append(f"・方向：偏多，本輪熊市低點大概率已出現｜目標 前高 {n0(LT['ath'])}，再上 {LT['top']}｜失效：週線收盤跌破 {n0(LT['low'])}")
+    L.append(f"・本輪低點約 {LT['low'] / 1000:.1f}K，最大再下探約 -{LT['dd_min'] * 100:.0f}~{LT['dd_max'] * 100:.0f}%（約 {dlo / 1000:.0f}–{dhi / 1000:.0f}K），仍在低點之上")
+    L.append(f"・若週期縮短，預估 {LT["ath_window"]}回測前高 {n0(LT['ath'])}")
+    L.append(f"・路徑：{LT['path']}")
+    L.append(f"・下個週期底預估在 {LT['next_bottom']}")
+    L += ["", "──────────", "・規則未回測；實單樣本 15 筆，各型態 1–4 筆，逆勢空單已降權"]
+    return "\n".join(L)
 if __name__ == "__main__":
     try:
         p = None
         if "--price" in sys.argv: p = float(sys.argv[sys.argv.index("--price") + 1])
+        if "--forecast" in sys.argv: print(forecast(p)); sys.exit(0)
         s, r = section(p)
         print(json.dumps(r, ensure_ascii=False) if "--json" in sys.argv else s)
     except Exception as e:

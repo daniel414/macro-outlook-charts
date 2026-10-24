@@ -139,7 +139,7 @@ def summary(j, when, ai):
     L += sec("【Ahr999】", f"・{f1(ah,2,False)}{zone}")
     # 【Binance】 is appended last by publish_btc.add_binance (live www rows -> 【Binance】; daily-dump fallback -> 【Binance（截至 …）】).
     # objective structure section (btc_structure.py via publish_btc.add_structure); omitted on any failure.
-    # 【交易模型】 (fengge_section.py via publish_btc.add_fengge, 2026-10-24) after 【技術結構】; omitted on any failure.
+    # 【交易模型】 (fengge_section.py via publish_btc.add_fengge, 2026-10-24); main() moves it into forecast_text.
     # 【多空比】 (ls_section.py via publish_btc.add_longshort) before 【未平倉量】; sources it could not fetch show 無資料.
     # Hyperliquid removed 2026-10-20 (Daniel): strip_hl also cleans carried-over AI sentences.
     return P.add_notes(P.strip_hl(P.add_binance(P.add_fengge(P.add_longshort(P.add_structure(P.EMOJI.sub("", "\n".join(L))[:4900]))))))
@@ -204,6 +204,9 @@ def main():
     if lead:
         import publish_btc as P; lead = P.strip_hl(lead)
     text = summary(j, when, ai)
+    import publish_btc as P
+    fc = P.build_forecast(text)   # BTC 走勢預測 (fengge_section.py --forecast); 【交易模型】 moves out of the data message
+    if fc: text = P.strip_model(text)
     big, pre = build_images(png, stamp)
     log("built", big, os.path.getsize(big), pre, os.path.getsize(pre), "ai_carry", ai_ok, sorted(ai))
     with open(os.path.join(OUT, "summary_text.txt"), "w") as fh: fh.write(text)
@@ -225,7 +228,7 @@ def main():
     u2 = P.pinned(P.gh_put(n2, open(pre, "rb").read(), "btc preview " + stamp + " (actions fallback)"), n2)
     cur3 = repo_json("btc/latest.json")
     if cur3.get("date") != cur.get("date") and not a.force: log("bot published meanwhile; keep the bot's latest.json (images stay, pruned later)"); return
-    d = {"date": when.strftime("%Y-%m-%d %H:%M"), "summary_text": text, "change_text": "", "lead_text": lead[:4900], "image_url": u1, "preview_url": u2,
+    d = {"date": when.strftime("%Y-%m-%d %H:%M"), "summary_text": P.merge_summary(fc, text), "forecast_text": fc, "change_text": "", "lead_text": lead[:4900], "image_url": u1, "preview_url": u2,
          "source": SOURCE, "ai_text_from": ai_from if ai_ok else None}
     P.gh_put("btc/latest.json", json.dumps(d, ensure_ascii=False, indent=1).encode(), "btc latest " + stamp + " (actions fallback)")
     log("PUBLISHED", u1)

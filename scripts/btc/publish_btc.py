@@ -11,12 +11,8 @@ import requests
 from PIL import Image
 HERE = os.path.dirname(os.path.abspath(__file__))
 GHR = "daniel414/macro-outlook-charts"
-# [fallback copy] box-only file; on GitHub Actions use GHR_OVERRIDE or the default above
-try:
-    src = open("/workspace/big-players/line_push.py").read()
-    m = re.search(r'GHR="([^"]+)"', src); GHR = m.group(1) if m else GHR
-except OSError: pass
-GHR = os.environ.get("GHR_OVERRIDE") or GHR
+src = open("/workspace/big-players/line_push.py").read()
+m = re.search(r'GHR="([^"]+)"', src); GHR = m.group(1) if m else GHR
 KEEP = 120  # ~1 week (16 runs/day)
 def H(): return {"Authorization": "Bearer " + os.environ["GH_CHARTS_TOKEN"], "Accept": "application/vnd.github+json"}
 API = f"https://api.github.com/repos/{GHR}/contents/"
@@ -137,6 +133,10 @@ def kol_text():
     for a in sorted(acc, key=lambda a: order.get(a.get("stance"), 9)):
         r = kfmt(a.get("reason", "")).split("；")[0].rstrip("。")
         L.append(f"・{a['handle']}｜{lab.get(a.get('stance'), a.get('stance', '-'))}｜{r}")
+    try:   # CryptoQuant top-5 BTC analysts (cq_consensus.py --kol, run as a script, reads the daily cache); optional
+        cq = subprocess.run([sys.executable, os.path.join(HERE, "cq_consensus.py"), "--kol"], cwd=HERE, capture_output=True, text=True, timeout=90).stdout.strip()
+        if cq.startswith("【CryptoQuant"): L += ["", KOL_DIV] + cq.splitlines()
+    except Exception as e: print("cq kol skipped:", e, file=sys.stderr)
     L += ["", "僅整理公開觀點，非投資建議"]
     return EMOJI.sub("", "\n".join(L))[:4900]
 def summary(j, when):
@@ -215,6 +215,19 @@ def add_range(text):
         return (t[:m.start()] + blk + "\n・" + ln + t[m.start() + len(blk):])[:4900]
     except Exception as e:
         print("range skipped:", e, file=sys.stderr); return text
+def add_consensus(text):
+    """Insert 【分析師共識】 (cq_consensus.py --line, run as a script; CryptoQuant σ as a contrarian gauge, cache refreshed daily)
+    right before 【技術結構】 (else before 【Binance…】, else at the end). Replaced if present, so it appears once. Unchanged on failure."""
+    try:
+        sec = subprocess.run([sys.executable, os.path.join(HERE, "cq_consensus.py"), "--line"], cwd=HERE, capture_output=True, text=True, timeout=90).stdout.strip()
+        if not sec.startswith("【分析師共識】"): return text
+        t = re.sub(r"\n*" + re.escape(DIV) + r"\n【分析師共識】.*?(?=\n\n" + re.escape(DIV) + r"\n|\Z)", "", text, flags=re.S).rstrip()
+        i = t.find("\n\n" + DIV + "\n【技術結構")
+        if i < 0: i = t.find("\n\n" + DIV + "\n【Binance")
+        blk = "\n\n" + DIV + "\n" + sec
+        return (t[:i] + blk + t[i:] if i >= 0 else t + blk)[:4900]
+    except Exception as e:
+        print("consensus skipped:", e, file=sys.stderr); return text
 def add_fengge(text):
     """Insert 【短線交易模型】 (fengge_section.py, run as a script; Daniel 2026-10-24) after 【技術結構】, before 【Binance…】
     (else at the end). Replaced if present. Reference only, does not replace the main model. Unchanged on failure."""
@@ -229,6 +242,30 @@ def add_fengge(text):
         return (t[:i] + blk + t[i:] if i >= 0 else t + blk)[:4900]
     except Exception as e:
         print("fengge skipped:", e, file=sys.stderr); return text
+FORECAST_IN_SUMMARY = True   # interim until the Worker sends d.forecast_text as its own message; then set False
+FORECAST_FILE = os.path.join(HERE, "out/publish/forecast_send.txt")
+MODEL_RE = r"\n*" + re.escape(DIV) + r"\n【(?:短線)?交易模型】.*?(?=\n\n" + re.escape(DIV) + r"\n|\Z)"
+def strip_model(text):
+    """Drop 【交易模型】 from the data message (it now lives in forecast_text)."""
+    return re.sub(MODEL_RE, "", text, flags=re.S).rstrip()
+def build_forecast(text):
+    """BTC 走勢預測 (fengge_section.py --forecast, run as a script; Daniel 2026-10-24 16:58). "" on failure.
+    The time line reuses the summary's timestamp so the Worker footer time is identical."""
+    try:
+        head = "\n".join(text.splitlines()[:3])
+        m = re.search(r"｜BTC ([\d,]+(?:\.\d+)?)", head)
+        cmd = [sys.executable, os.path.join(HERE, "fengge_section.py"), "--forecast"] + (["--price", m.group(1).replace(",", "")] if m else [])
+        fc = subprocess.run(cmd, cwd=HERE, capture_output=True, text=True, timeout=60).stdout.strip()
+        if not fc.startswith("BTC 走勢預測"): return ""
+        ts = re.search(r"\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}", text)
+        if ts: fc = re.sub(r"\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}", ts.group(0), fc, count=1)
+        return fc[:4900]
+    except Exception as e:
+        print("forecast skipped:", e, file=sys.stderr); return ""
+def merge_summary(fc, data):
+    if not (FORECAST_IN_SUMMARY and fc): return data
+    m = fc + "\n\n" + DIV + "\n\n" + data
+    return m if len(m) <= 4950 else data
 BN_FRESH = 2 * 3600
 def bn_latest():
     import sqlite3
@@ -325,7 +362,9 @@ def main():
     if a.text: text = open(a.text).read().strip()[:4900]
     elif j: text = summary(j, when)
     else: sys.exit("need --text or --json (or run without args)")
-    text = add_notes(strip_hl(add_binance(add_fengge(add_longshort(add_rvw(add_range(add_structure(text))))))))
+    text = add_notes(strip_hl(add_binance(add_fengge(add_consensus(add_longshort(add_rvw(add_range(add_structure(text)))))))))
+    fc = build_forecast(text)
+    if fc: text = strip_model(text)
     stamp = when.strftime("%Y%m%d_%H%M")
     os.makedirs(os.path.join(HERE, "out/publish"), exist_ok=True)
     big = os.path.join(HERE, f"out/publish/btc_positioning_{stamp}.jpg"); pre = big[:-4] + "_preview.jpg"
@@ -342,12 +381,14 @@ def main():
         if os.path.getsize(pre) < 0.95e6 or q < 40: break
         q -= 10
     print("built", big, os.path.getsize(big), pre, os.path.getsize(pre), file=sys.stderr)
+    with open(FORECAST_FILE, "w") as fh: fh.write(fc)
     print(text)
+    print("FORECAST_FILE", FORECAST_FILE, len(fc), file=sys.stderr)
     if a.dry_run: return
     n1 = "btc/" + os.path.basename(big); n2 = "btc/" + os.path.basename(pre)
     u1 = pinned(gh_put(n1, open(big, "rb").read(), "btc chart " + stamp), n1)
     u2 = pinned(gh_put(n2, open(pre, "rb").read(), "btc preview " + stamp), n2)
-    d = {"date": when.strftime("%Y-%m-%d %H:%M"), "summary_text": text, "change_text": change_text(), "lead_text": lead_text(), "image_url": u1, "preview_url": u2}
+    d = {"date": when.strftime("%Y-%m-%d %H:%M"), "summary_text": merge_summary(fc, text), "forecast_text": fc, "change_text": change_text(), "lead_text": lead_text(), "image_url": u1, "preview_url": u2}
     publish_kol(when, stamp)
     gh_put("btc/latest.json", json.dumps(d, ensure_ascii=False, indent=1).encode(), "btc latest " + stamp)
     print("PUBLISHED", u1, u2, file=sys.stderr)
