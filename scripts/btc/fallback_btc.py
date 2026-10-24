@@ -228,7 +228,8 @@ def main():
     u2 = P.pinned(P.gh_put(n2, open(pre, "rb").read(), "btc preview " + stamp + " (actions fallback)"), n2)
     cur3 = repo_json("btc/latest.json")
     if cur3.get("date") != cur.get("date") and not a.force: log("bot published meanwhile; keep the bot's latest.json (images stay, pruned later)"); return
-    d = {"date": when.strftime("%Y-%m-%d %H:%M"), "summary_text": P.merge_summary(fc, text), "forecast_text": fc, "change_text": "", "lead_text": lead[:4900], "image_url": u1, "preview_url": u2,
+    sm = P.merge_summary(fc, text)
+    d = {"date": when.strftime("%Y-%m-%d %H:%M"), "summary_text": sm, "forecast_text": fc, "forecast_parts": P.split_parts(fc), "forecast_merged": sm != text, "change_text": "", "lead_text": lead[:4900], "image_url": u1, "preview_url": u2,
          "source": SOURCE, "ai_text_from": ai_from if ai_ok else None}
     P.gh_put("btc/latest.json", json.dumps(d, ensure_ascii=False, indent=1).encode(), "btc latest " + stamp + " (actions fallback)")
     log("PUBLISHED", u1)

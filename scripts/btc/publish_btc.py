@@ -266,7 +266,7 @@ def add_fengge(text):
         return (t[:i] + blk + t[i:] if i >= 0 else t + blk)[:4900]
     except Exception as e:
         print("fengge skipped:", e, file=sys.stderr); return text
-FORECAST_IN_SUMMARY = True   # interim until the Worker sends d.forecast_text as its own message; then set False
+FORECAST_IN_SUMMARY = False   # Worker sends forecast_parts as separate messages (2026-10-24 17:44)
 FORECAST_FILE = os.path.join(HERE, "out/publish/forecast_send.txt")
 MODEL_RE = r"\n*" + re.escape(DIV) + r"\n【(?:短線)?交易模型】.*?(?=\n\n" + re.escape(DIV) + r"\n|\Z)"
 def strip_model(text):
