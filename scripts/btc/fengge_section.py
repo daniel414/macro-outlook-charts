@@ -1,4 +1,4 @@
-"""【鋒哥短線參考】 for /btc: mechanical version of 鋒哥 (@Traderfengge) price-action model
+"""【短線交易模型】 for /btc: mechanical short-term price-action model
 (/workspace/big-players/fengge/full_model.md, approved by Daniel 2026-10-24). Reference block only; does not replace the main model.
 Rules: 1) trend filter = price vs 50-week MA + daily swing structure (HH/HL or LH/LL); only the trend direction is labelled.
 2) entry A = 0.5-0.618 retracement zone + 1H/4H reversal (false break reclaimed, double-bottom/top neckline retest);
@@ -7,7 +7,7 @@ Rules: 1) trend filter = price vs 50-week MA + daily swing structure (HH/HL or L
 Free public data: OKX BTC-USDT candles (1Wutc/1Dutc/4H/1H). Stdlib only.
 Usage: fengge_section.py [--price 80780] [--json]  -> prints the section, or nothing on failure (exit 0)."""
 import json, sys, urllib.request
-TITLE = "【鋒哥短線參考】"
+TITLE = "【短線交易模型】"
 UA = {"User-Agent": "btc-fengge/1.0"}
 B = "https://www.okx.com/api/v5/market/"
 def _get(u, t=10): return json.load(urllib.request.urlopen(urllib.request.Request(u, headers=UA), timeout=t))
@@ -113,7 +113,7 @@ def section(price=None):
     pos = "上方" if px > r["ma50w"] else "下方"
     if r["side"] == "long": tr = "順勢方向：多（只看低多）"
     elif r["side"] == "short": tr = "順勢方向：空（只看高空）"
-    else: tr = "方向不一致：不做（鋒哥：放掉勝率低的交易）"
+    else: tr = "方向不一致：不做（只做順勢，放掉勝率低的交易）"
     L = [TITLE, f"・趨勢：BTC {n0(px)} 在 50 週均線 {n0(r['ma50w'])} {pos}｜日線 {r['daily']}｜{tr}"]
     lo, hi = r["leg"]; z = r["zone"]
     leg = f"{n0(lo)}→{n0(hi)}" if r["dirn"] == "long" else f"{n0(hi)}→{n0(lo)}"
@@ -131,7 +131,7 @@ def section(price=None):
     L.append(f"・狀態：{state}")
     if r["side"] is not None:
         L.append(f"・{word}單計畫：止損 {n0(r['stop'])}（前波段外）｜T1 {n0(r['t1'])}｜T2 {n0(min(r['t2']))}–{n0(max(r['t2']))}（斐波 1.382–1.618）｜到 T1 出一半，餘倉止損移到開倉價")
-    L.append("・樣本小：逐字稿實單 15 筆，各型態 1–4 筆；逆勢空單止損命中率高，已降權")
+    L.append("・規則樣本小：實單 15 筆，各型態 1–4 筆；逆勢空單止損命中率高，已降權")
     return "\n".join(L), r
 if __name__ == "__main__":
     try:

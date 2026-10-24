@@ -216,14 +216,14 @@ def add_range(text):
     except Exception as e:
         print("range skipped:", e, file=sys.stderr); return text
 def add_fengge(text):
-    """Insert 【鋒哥短線參考】 (fengge_section.py, run as a script; Daniel 2026-10-24) after 【技術結構】, before 【Binance…】
+    """Insert 【短線交易模型】 (fengge_section.py, run as a script; Daniel 2026-10-24) after 【技術結構】, before 【Binance…】
     (else at the end). Replaced if present. Reference only, does not replace the main model. Unchanged on failure."""
     try:
         m = re.search(r"｜BTC ([\d,]+(?:\.\d+)?)", "\n".join(text.splitlines()[:3]))
         cmd = [sys.executable, os.path.join(HERE, "fengge_section.py")] + (["--price", m.group(1).replace(",", "")] if m else [])
         sec = subprocess.run(cmd, cwd=HERE, capture_output=True, text=True, timeout=60).stdout.strip()
-        if not sec.startswith("【鋒哥短線參考】"): return text
-        t = re.sub(r"\n*" + re.escape(DIV) + r"\n【鋒哥短線參考】.*?(?=\n\n" + re.escape(DIV) + r"\n|\Z)", "", text, flags=re.S).rstrip()
+        if not sec.startswith("【短線交易模型】"): return text
+        t = re.sub(r"\n*" + re.escape(DIV) + r"\n【短線交易模型】.*?(?=\n\n" + re.escape(DIV) + r"\n|\Z)", "", text, flags=re.S).rstrip()
         i = t.find("\n\n" + DIV + "\n【Binance")
         blk = "\n\n" + DIV + "\n" + sec
         return (t[:i] + blk + t[i:] if i >= 0 else t + blk)[:4900]
