@@ -290,7 +290,7 @@ def forecast(price=None):
     lv = onchain_levels()
     import datetime as dt
     tw = dt.datetime.now(dt.timezone(dt.timedelta(hours=8)))
-    L = ["BTC 走勢預測（規則未回測）", f"{tw.strftime('%Y.%m.%d %H:%M')} (UTC+8)｜BTC {n0(px)}"]
+    L = ["BTC 走勢預測", f"{tw.strftime('%Y.%m.%d %H:%M')} (UTC+8)｜BTC {n0(px)}"]
     bt = None
     try: bt = big_trend(r, w, d)
     except Exception as e: print("big trend skipped:", e, file=sys.stderr)
@@ -359,13 +359,12 @@ def forecast(price=None):
         L.append(f"・路徑二：週線收盤跌破 {n0(a)}，大結構轉弱，二次探底" + (f"，依序看 {dd}" if dd else ""))
     LT = LONG_VIEW
     dlo, dhi = px * (1 - LT["dd_max"]), px * (1 - LT["dd_min"])
-    L += ["", "──────────", "【長期大方向推測】（推測，規則未回測）"]
+    L += ["", "──────────", "【長期大方向推測】"]
     L.append(f"・方向：偏多，本輪熊市低點大概率已出現｜目標 前高 {n0(LT['ath'])}，再上 {LT['top']}｜失效：週線收盤跌破 {n0(LT['low'])}")
     L.append(f"・本輪低點約 {LT['low'] / 1000:.1f}K，最大再下探約 -{LT['dd_min'] * 100:.0f}~{LT['dd_max'] * 100:.0f}%（約 {dlo / 1000:.0f}–{dhi / 1000:.0f}K），仍在低點之上")
-    L.append(f"・若週期縮短，預估 {LT["ath_window"]}回測前高 {n0(LT['ath'])}")
+    L.append(f"・@KillaXBT 猜測路徑：若週期縮短，{LT["ath_window"]}回測前高 {n0(LT['ath'])}")
     L.append(f"・路徑：{LT['path']}")
     L.append(f"・下個週期底預估在 {LT['next_bottom']}")
-    L += ["", "──────────", "・規則未回測；實單樣本 15 筆，各型態 1–4 筆，逆勢空單已降權"]
     return "\n".join(L)
 if __name__ == "__main__":
     try:
