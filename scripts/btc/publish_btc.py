@@ -119,6 +119,19 @@ def _quiet(a, days=3):
     except Exception: return False
 # 鋒哥 長期觀點（與 fengge_section.FAV_VIEWS long 同步，人工維護）
 KOL_EXTRA_LONG = {"traderfengge": ["57,700 為本輪低點", "目標回前高約 130,000", "失效：跌回 70,000，再破 60,000 則反轉失敗"]}
+# Analyst name -> X handle (Daniel 2026-10-24: 分析師一律用 X 帳號；鋒哥 保留中文)
+X_HANDLE = {"benjamincowen": "benjamincowen", "Benjamin Cowen": "benjamincowen", "Cowen": "benjamincowen",
+            "KrownCryptoCave": "KrownCryptoCave", "Krown": "KrownCryptoCave", "KillaXBT": "KillaXBT", "Killa": "KillaXBT",
+            "SailorManCrypto": "SailorManCrypto", "SailorMan": "SailorManCrypto", "Murphychen888": "Murphychen888", "Murphy": "Murphychen888",
+            "market_beggar": "market_beggar", "qinbafrank": "qinbafrank", "0xCryptoChan": "0xCryptoChan", "damskotrades": "damskotrades",
+            "rektcapital": "rektcapital", "RektProof": "RektProof", "WallStreet0Name": "WallStreet0Name", "jstin0502": "jstin0502", "xtony1314": "xtony1314"}
+def xh_name(h):
+    return "鋒哥" if h == "traderfengge" else "@" + X_HANDLE.get(h, h)
+def xh(text):
+    """Replace bare analyst names in free text with @handle (skip already-@ and parts of longer words)."""
+    for k in sorted(X_HANDLE, key=len, reverse=True):
+        text = re.sub(r"(?<![@A-Za-z0-9_])" + re.escape(k) + r"(?![A-Za-z0-9_])", "@" + X_HANDLE[k], text)
+    return text
 def kol_text():
     """/btckol text: title+time, ━ blocks: 整體立場 / 共同關注價位 / 主要分歧 / 各分析師 (觀點+短線+長期 per analyst)."""
     try:
@@ -138,21 +151,21 @@ def kol_text():
         px = ""
     L = ["BTC 分析師觀點", f"{ts} (UTC+8){px}", "", KOL_DIV, "【整體立場】",
          f"・看多 {n('偏多')}｜中性 {n('中性')}｜看空 {n('偏空')}｜未談 {n('未談BTC')}"]
-    if d.get("summary"): L.append("・" + kfmt(d["summary"]).strip())
+    if d.get("summary"): L.append("・" + xh(kfmt(d["summary"]).strip()))
     if d.get("common_levels"):
         L += ["", KOL_DIV, "【共同關注價位】"] + ["・" + kfmt(x).strip() for x in d["common_levels"].split("｜") if x.strip()]
     if d.get("divergence"):
-        L += ["", KOL_DIV, "【主要分歧】"] + ["・" + kfmt(x).strip().rstrip("。") for x in re.split(r"[；;]", d["divergence"]) if x.strip()]
+        L += ["", KOL_DIV, "【主要分歧】"] + ["・" + xh(kfmt(x).strip()).rstrip("。") for x in re.split(r"[；;]", d["divergence"]) if x.strip()]
     lab = {"偏多": "看多", "偏空": "看空", "中性": "中性", "未談BTC": "未談"}
     order = {"偏多": 0, "中性": 1, "偏空": 2, "未談BTC": 3}
     L += ["", KOL_DIV, "【各分析師】"]
     quiet = []
     for a in sorted(acc, key=lambda a: order.get(st(a), 9)):
-        if st(a) == "未談BTC": quiet.append(a["handle"]); continue
+        if st(a) == "未談BTC": quiet.append(xh_name(a["handle"])); continue
         r = kfmt(a.get("reason", "")).split("；")[0].rstrip("。")
         segs = [x.strip() for x in (a.get("levels") or "").split("｜") if x.strip() and x.strip() != "-"]
         lo = [kfmt(x) for x in segs if _tf(x) == "long"] + KOL_EXTRA_LONG.get(a["handle"], []); sh = [kfmt(x) for x in segs if _tf(x) != "long"]
-        L.append(f"・{a['handle']}｜{lab.get(a.get('stance'), a.get('stance', '-'))}" + (f"（{a['latest_post'][5:].replace('-', '/')}）" if a.get("latest_post") else ""))
+        L.append(f"・{xh_name(a['handle'])}｜{lab.get(a.get('stance'), a.get('stance', '-'))}" + (f"（{a['latest_post'][5:].replace('-', '/')}）" if a.get("latest_post") else ""))
         if r: L.append(f"  觀點：{r}")
         if sh: L.append("  短線：" + "；".join(sh))
         if lo: L.append("  長期：" + "；".join(lo))

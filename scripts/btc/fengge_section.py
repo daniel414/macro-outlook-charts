@@ -327,7 +327,7 @@ def views_block(layer, kl, n=3):
     for h, st, seg in kl.get(layer, []):
         seen.setdefault(h, (st, []))[1].append(seg)
     for h, (st, segs) in list(seen.items())[:n]:
-        L.append(f"・@{h}（{st}）：{'；'.join(segs[:2])}")
+        L.append(f"・{xh_name(h)}（{st}）：{'；'.join(segs[:2])}")
     return ["・分析師觀點："] + ["  " + x for x in L] if L else []
 def forecast(price=None):
     r = analyse(price); px = r["price"]; w, d, h4 = _CACHE["w"], _CACHE["d"], _CACHE["h4"]
@@ -417,6 +417,19 @@ def forecast(price=None):
 def _kv(t):
     """80.5K -> 80,500 style kept short: leave K notation (compact message)."""
     return (t or "").strip()
+# Analyst name -> X handle (Daniel 2026-10-24: 分析師一律用 X 帳號；鋒哥 保留中文)
+X_HANDLE = {"benjamincowen": "benjamincowen", "Benjamin Cowen": "benjamincowen", "Cowen": "benjamincowen",
+            "KrownCryptoCave": "KrownCryptoCave", "Krown": "KrownCryptoCave", "KillaXBT": "KillaXBT", "Killa": "KillaXBT",
+            "SailorManCrypto": "SailorManCrypto", "SailorMan": "SailorManCrypto", "Murphychen888": "Murphychen888", "Murphy": "Murphychen888",
+            "market_beggar": "market_beggar", "qinbafrank": "qinbafrank", "0xCryptoChan": "0xCryptoChan", "damskotrades": "damskotrades",
+            "rektcapital": "rektcapital", "RektProof": "RektProof", "WallStreet0Name": "WallStreet0Name", "jstin0502": "jstin0502", "xtony1314": "xtony1314"}
+def xh_name(h):
+    return "鋒哥" if h == "traderfengge" else "@" + X_HANDLE.get(h, h)
+def xh(text):
+    """Replace bare analyst names in free text with @handle (skip already-@ and parts of longer words)."""
+    for k in sorted(X_HANDLE, key=len, reverse=True):
+        text = re.sub(r"(?<![@A-Za-z0-9_])" + re.escape(k) + r"(?![A-Za-z0-9_])", "@" + X_HANDLE[k], text)
+    return text
 def _kol_digest():
     try:
         d = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "kol/latest_view.json")))
@@ -427,7 +440,7 @@ def _kol_digest():
     for part in (d.get("common_levels") or "").split("｜"):
         m = re.match(r"\s*(支撐|壓力|上方目標|下方目標)\s*(.+)", part)
         if m: lv[m.group(1)] = [x.strip() for x in m.group(2).split("、") if x.strip()]
-    div = [x.strip().rstrip("。") for x in re.split(r"[；;]", d.get("divergence") or "") if x.strip()]
+    div = [xh(x.strip()).rstrip("。") for x in re.split(r"[；;]", d.get("divergence") or "") if x.strip()]
     return cnt, lv, div
 def _fav(layer, who="鋒哥"):
     return next((t for w, t in FAV_VIEWS.get(layer, []) if w == who), "")
