@@ -15,6 +15,8 @@ now = datetime.now(TZ); what = sys.argv[1]
 if what == "btc":
     d = get("btc/latest.json"); mine = d.get("source") == "github-actions-fallback"
     lim = int(os.environ.get("SELF_MAX_AGE_MIN" if mine else "BOT_MAX_AGE_MIN", 50 if mine else 80))
+    if os.environ.get("SIMULATE_AGE_MIN"):  # test only (workflow_dispatch simulate_stale): the fallback step is then forced to dry-run
+        d["date"] = (now - timedelta(minutes=int(os.environ["SIMULATE_AGE_MIN"]))).strftime("%Y-%m-%d %H:%M"); mine = False; lim = int(os.environ.get("BOT_MAX_AGE_MIN", 80)); print("SIMULATE_AGE_MIN set")
     age = (now - tp(d["date"])).total_seconds() / 60; stale = age >= lim
     print(f"btc/latest.json date={d['date']} (UTC+8) source={'fallback' if mine else 'bot'} age={age:.0f}min limit={lim}min")
 elif what == "onchain":

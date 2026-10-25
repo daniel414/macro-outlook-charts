@@ -3,7 +3,8 @@
 name: fallback-btc
 on:
   schedule:
-    - cron: "35 * * * *"          # every hour at :35 (UTC+8 :35), ~25 min after the bot's usual run
+    - cron: "35 * * * *"          # every hour at :35, ~25 min after the bot's usual run
+    - cron: "55 * * * *"          # second slot: GitHub drops many scheduled runs (10/25 17:35 never ran)
   workflow_dispatch:
     inputs:
       mode:
@@ -13,6 +14,10 @@ on:
         default: dry-run
       force:
         description: "ignore staleness"
+        type: boolean
+        default: false
+      simulate_stale:
+        description: "test: pretend btc/latest.json is 120 min old (forces dry-run, no writes)"
         type: boolean
         default: false
 permissions:
@@ -41,14 +46,16 @@ jobs:
       - id: check
         env:
           FORCE: ${{ (github.event_name == 'workflow_dispatch' && inputs.force) && '1' || '0' }}
+          SIMULATE_AGE_MIN: ${{ (github.event_name == 'workflow_dispatch' && inputs.simulate_stale) && '120' || '' }}
         run: python3 scripts/check_stale.py btc
-      - if: steps.check.outputs.stale == 'true' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'dry-run')
+      - if: steps.check.outputs.stale == 'true' || (github.event_name == 'workflow_dispatch' && (inputs.mode == 'dry-run' || inputs.simulate_stale))
         uses: ./.github/actions/setup-render
-      - if: steps.check.outputs.stale == 'true' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'dry-run')
+      - if: steps.check.outputs.stale == 'true' || (github.event_name == 'workflow_dispatch' && (inputs.mode == 'dry-run' || inputs.simulate_stale))
         working-directory: scripts/btc
         run: |
           MODE="${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'publish' }}"
           FORCE_ARG="${{ (github.event_name == 'workflow_dispatch' && inputs.force) && '--force' || '' }}"
+          if [ "${{ github.event_name == 'workflow_dispatch' && inputs.simulate_stale }}" = "true" ]; then MODE=dry-run; FORCE_ARG=--force; echo "SIMULATED STALE: dry-run, no writes"; fi
           python fallback_btc.py --mode "$MODE" $FORCE_ARG
       - if: github.event_name == 'workflow_dispatch' && inputs.mode == 'dry-run'
         uses: actions/upload-artifact@v4

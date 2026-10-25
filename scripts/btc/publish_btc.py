@@ -11,8 +11,12 @@ import requests
 from PIL import Image
 HERE = os.path.dirname(os.path.abspath(__file__))
 GHR = "daniel414/macro-outlook-charts"
-src = open("/workspace/big-players/line_push.py").read()
-m = re.search(r'GHR="([^"]+)"', src); GHR = m.group(1) if m else GHR
+# box-only file; on GitHub Actions (fallback) it is absent -> GHR_OVERRIDE or the default above
+try:
+    src = open("/workspace/big-players/line_push.py").read()
+    m = re.search(r'GHR="([^"]+)"', src); GHR = m.group(1) if m else GHR
+except OSError: pass
+GHR = os.environ.get("GHR_OVERRIDE") or GHR
 KEEP = 120  # ~1 week (16 runs/day)
 def H(): return {"Authorization": "Bearer " + os.environ["GH_CHARTS_TOKEN"], "Accept": "application/vnd.github+json"}
 API = f"https://api.github.com/repos/{GHR}/contents/"
