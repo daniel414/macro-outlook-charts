@@ -136,8 +136,22 @@ def xh(text):
     for k in sorted(X_HANDLE, key=len, reverse=True):
         text = re.sub(r"(?<![@A-Za-z0-9_])" + re.escape(k) + r"(?![A-Za-z0-9_])", "@" + X_HANDLE[k], text)
     return text
+def _one(a, cap=46):
+    """One short sentence per analyst (Daniel 2026-10-27): core view clipped at a clause boundary, plus up to 2 key levels not already in it."""
+    r = xh(kfmt(a.get("reason", ""))).split("；")[0].rstrip("。").strip()
+    r = re.sub(r"^YouTube\s*\d+/\d+[：:]\s*", "", r)
+    if len(r) > cap:
+        parts, out = re.split(r"(?<=[，、])", r), ""
+        for x in parts:
+            if out and len(out + x) > cap: break
+            out += x
+        r = out.rstrip("，、 ")
+    segs = [kfmt(x.strip()) for x in (a.get("levels") or "").split("｜") if x.strip() and x.strip() != "-" and re.search(r"\d", x)]
+    nums = lambda t: set(re.findall(r"\d[\d,]{3,}", t))
+    keys = [x for x in segs if len(x) <= 22 and not (nums(x) and nums(x) <= nums(r))][:2] if len(r) < 40 else []
+    return r + ("｜關鍵 " + "；".join(keys) if keys else "")
 def kol_text():
-    """/btckol text: title+time, ━ blocks: 整體立場 / 共同關注價位 / 主要分歧 / 各分析師 (觀點+短線+長期 per analyst)."""
+    """/btckol text: title+time, ━ blocks: 整體立場 / 共同關注價位 / 主要分歧 / 各分析師 (one line per analyst)."""
     try:
         d = json.load(open(os.path.join(HERE, "kol/latest_view.json"))); acc = d["accounts"]
     except Exception:
@@ -166,13 +180,7 @@ def kol_text():
     quiet = []
     for a in sorted(acc, key=lambda a: order.get(st(a), 9)):
         if st(a) == "未談BTC": quiet.append(xh_name(a["handle"])); continue
-        r = kfmt(a.get("reason", "")).split("；")[0].rstrip("。")
-        segs = [x.strip() for x in (a.get("levels") or "").split("｜") if x.strip() and x.strip() != "-"]
-        lo = [kfmt(x) for x in segs if _tf(x) == "long"] + KOL_EXTRA_LONG.get(a["handle"], []); sh = [kfmt(x) for x in segs if _tf(x) != "long"]
-        L.append(f"・{xh_name(a['handle'])}｜{lab.get(a.get('stance'), a.get('stance', '-'))}" + (f"（{a['latest_post'][5:].replace('-', '/')}）" if a.get("latest_post") else ""))
-        if r: L.append(f"  觀點：{r}")
-        if sh: L.append("  短線：" + "；".join(sh))
-        if lo: L.append("  長期：" + "；".join(lo))
+        L.append(f"・{xh_name(a['handle'])}｜{lab.get(a.get('stance'), a.get('stance', '-'))}" + (f"（{a['latest_post'][5:].replace('-', '/')}）" if a.get("latest_post") else "") + (f"：{_one(a)}" if _one(a) else ""))
     if quiet: L.append("・近期未談 BTC：" + "、".join(quiet))
     try:   # CryptoQuant top-5 BTC analysts (cq_consensus.py --kol, run as a script, reads the daily cache); optional
         cq = subprocess.run([sys.executable, os.path.join(HERE, "cq_consensus.py"), "--kol"], cwd=HERE, capture_output=True, text=True, timeout=90).stdout.strip()
@@ -410,7 +418,8 @@ def add_rvw(text):
     except Exception as e:
         print("rvw skipped:", e, file=sys.stderr); return text
 def main():
-    a = argparse.ArgumentParser(); a.add_argument("--image"); a.add_argument("--json"); a.add_argument("--text"); a.add_argument("--dry-run", action="store_true"); a.add_argument("--kol-only", action="store_true", help="only analyst image + btc/kol_latest.json"); a = a.parse_args()
+    a = argparse.ArgumentParser(); a.add_argument("--image"); a.add_argument("--json"); a.add_argument("--text"); a.add_argument("--dry-run", action="store_true"); a.add_argument("--kol-text", action="store_true", help="print /btckol text only"); a.add_argument("--kol-only", action="store_true", help="only analyst image + btc/kol_latest.json"); a = a.parse_args()
+    if a.kol_text: print(kol_text()); return   # print /btckol text only, no upload
     if a.kol_only:
         now = datetime.now(); publish_kol(now, now.strftime("%Y%m%d_%H%M"))
         try: prune_one("btc_kol_")
