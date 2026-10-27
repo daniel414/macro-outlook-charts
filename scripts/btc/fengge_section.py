@@ -430,6 +430,15 @@ def xh(text):
     for k in sorted(X_HANDLE, key=len, reverse=True):
         text = re.sub(r"(?<![@A-Za-z0-9_])" + re.escape(k) + r"(?![A-Za-z0-9_])", "@" + X_HANDLE[k], text)
     return text
+def _split_top(t, sep="、"):
+    """Split on sep only outside （）/() so labels like 83K（A、B）stay with their price."""
+    out, buf, dep = [], "", 0
+    for ch in t:
+        if ch in "（(": dep += 1
+        elif ch in "）)": dep = max(0, dep - 1)
+        if ch == sep and dep == 0: out.append(buf); buf = ""
+        else: buf += ch
+    out.append(buf); return out
 def _kol_digest():
     try:
         d = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "kol/latest_view.json")))
@@ -438,8 +447,10 @@ def _kol_digest():
     cnt = {k: sum(a.get("stance") == k for a in acc) for k in ("偏多", "中性", "偏空")}
     lv = {}
     for part in (d.get("common_levels") or "").split("｜"):
-        m = re.match(r"\s*(支撐|壓力|上方目標|下方目標)\s*(.+)", part)
-        if m: lv[m.group(1)] = [x.strip() for x in m.group(2).split("、") if x.strip()]
+        m = re.match(r"\s*(支撐|壓力|上方目標(?:與清算區?)?|下方目標)\s*(.+)", part)
+        if m:
+            key = "上方目標" if m.group(1).startswith("上方目標") else m.group(1)
+            lv[key] = [xh(x.strip()) for x in _split_top(m.group(2)) if x.strip()]
     div = [xh(x.strip()).rstrip("。") for x in re.split(r"[；;]", d.get("divergence") or "") if x.strip()]
     return cnt, lv, div
 def _fav(layer, who="鋒哥"):
@@ -476,7 +487,7 @@ def forecast_compact(price=None):
     s2 = []
     if flo: s2.append(f"{n0(min(flo))}–{n0(max(flo))} 是 50 週均線、短期持有者成本與鏈上市場均價的交會區")
     if _fav("mid"): s2.append("鋒哥：" + _fav("mid"))
-    s2.append(f"上方 {zs(zu[0]) if zu else '前高'} 站回才轉強" + (f"，分析師共同壓力 {'、'.join(kl['壓力'][-2:])}" if kl.get("壓力") else "") + (f"、上方目標 {'、'.join(kl['上方目標'][:2])}" if kl.get("上方目標") else ""))
+    s2.append(f"上方 {zs(zu[0]) if zu else '前高'} 站回才轉強" + (f"，分析師共同壓力 {'、'.join(kl['壓力'][-2:])}" if kl.get("壓力") else "") + (f"，上方目標與清算區 {'、'.join(kl['上方目標'][:2])}" if kl.get("上方目標") else ""))
     L.append("；".join(s2) + "。")
     # 長期
     LT = LONG_VIEW
