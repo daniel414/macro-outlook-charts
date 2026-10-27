@@ -6,7 +6,7 @@ cd "$(dirname "$0")"
 export TZ=Asia/Taipei
 REPO=https://github.com/daniel414/macro-outlook-charts.git
 TMP=/tmp/selfheal_repo
-SYNC="btc_structure.py ls_section.py posdata.py positioning_grid.py range_body.py cq_consensus.py whale_delta_chart.py fengge_section.py selfheal.sh"
+SYNC="btc_structure.py ls_section.py posdata.py positioning_grid.py range_body.py cq_consensus.py whale_delta_chart.py fengge_section.py selfheal.sh chainlink_price.py"
 LOCALONLY="publish_btc.py config.json"   # repo copy is the GitHub Actions fallback / older calibration: restore only if missing
 fixed=(); diff=(); warn=0
 w(){ echo "WARN selfheal: $*"; warn=1; }

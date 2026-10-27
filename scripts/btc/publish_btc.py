@@ -75,10 +75,39 @@ def change_text():
     except Exception:
         return ""
 LEAD_FILE = os.path.join(HERE, "out/lead_text.txt")
+PRICE = {}   # set by apply_chainlink(): old/new price strings, source label, check details
+def apply_chainlink(text, ref=None):
+    """Current price = Chainlink BTC/USD (Daniel 2026-10-27). Sanity: diff vs existing source < 0.5%, updatedAt <= 2h,
+    else keep the existing (exchange kline) price. Header line 2 gets 「｜現價來源：…」; old price string replaced in text."""
+    L = text.splitlines()
+    m = re.search(r"｜BTC ([\d,]+(?:\.\d+)?)", L[1]) if len(L) > 1 else None
+    if not m: return text
+    old = m.group(1); ref = ref or float(old.replace(",", ""))
+    try:
+        r = subprocess.run([sys.executable, os.path.join(HERE, "chainlink_price.py"), str(ref)], cwd=HERE, capture_output=True, text=True, timeout=60)
+        c = json.loads(r.stdout.strip().splitlines()[-1])
+    except Exception as e:
+        c = {"ok": False, "reason": f"chainlink script failed: {type(e).__name__}"}
+    PRICE.update(check=c, ref=ref)
+    if c.get("ok"):
+        new = f"{c['price']:,.0f}"; PRICE.update(old=old, new=new, source="Chainlink")
+        text = text.replace(old, new)
+    else:
+        PRICE.update(source="交易所 K 線（Chainlink 未通過檢查）")
+    print("PRICE_SOURCE", json.dumps({k: v for k, v in PRICE.items()}, ensure_ascii=False), file=sys.stderr)
+    return add_src(text)
+def add_src(t):
+    """Append 「｜現價來源：X」 to line 2 (idempotent)."""
+    if not PRICE.get("source"): return t
+    L = t.splitlines()
+    if len(L) > 1 and "現價來源" not in L[1]: L[1] += "｜現價來源：" + PRICE["source"]
+    return "\n".join(L)
 def lead_text():
     try:
         if time.time() - os.path.getmtime(LEAD_FILE) > 3 * 3600: return ""  # stale: skip
-        return strip_hl(EMOJI.sub("", open(LEAD_FILE).read()).strip())[:4900]
+        t = strip_hl(EMOJI.sub("", open(LEAD_FILE).read()).strip())
+        if PRICE.get("old") and PRICE.get("new"): t = t.replace(PRICE["old"], PRICE["new"])
+        return t[:4900]
     except Exception:
         return ""
 def change_section(sec):
@@ -440,8 +469,10 @@ def main():
     if a.text: text = open(a.text).read().strip()[:4900]
     elif j: text = summary(j, when)
     else: sys.exit("need --text or --json (or run without args)")
+    text = apply_chainlink(text, j.get("btc") if j else None)
     text = add_notes(strip_hl(add_binance(add_fengge(add_consensus(add_longshort(add_rvw(add_range(add_structure(text)))))))))
     fc = build_forecast(text)
+    if fc: fc = add_src(fc)
     if fc: text = strip_model(text)
     stamp = when.strftime("%Y%m%d_%H%M")
     os.makedirs(os.path.join(HERE, "out/publish"), exist_ok=True)
@@ -468,7 +499,7 @@ def main():
     n1 = "btc/" + os.path.basename(big); n2 = "btc/" + os.path.basename(pre)
     u1 = pinned(gh_put(n1, open(big, "rb").read(), "btc chart " + stamp), n1)
     u2 = pinned(gh_put(n2, open(pre, "rb").read(), "btc preview " + stamp), n2)
-    d = {"date": when.strftime("%Y-%m-%d %H:%M"), "summary_text": merge_summary(fc, text), "forecast_text": fc, "forecast_parts": fparts, "forecast_merged": merged, "change_text": change_text(), "lead_text": lead_text(), "image_url": u1, "preview_url": u2}
+    d = {"date": when.strftime("%Y-%m-%d %H:%M"), "summary_text": merge_summary(fc, text), "forecast_text": fc, "forecast_parts": fparts, "forecast_merged": merged, "change_text": change_text(), "lead_text": lead_text(), "image_url": u1, "preview_url": u2, "price_source": PRICE.get("source", "")}
     publish_kol(when, stamp)
     gh_put("btc/latest.json", json.dumps(d, ensure_ascii=False, indent=1).encode(), "btc latest " + stamp)
     print("PUBLISHED", u1, u2, file=sys.stderr)
