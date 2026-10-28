@@ -1,35 +1,28 @@
 #!/usr/bin/env python3
-"""「BTC 持倉數據」hourly overview (replaces the retail-sentiment grid for Daniel, 2026-10-14; grid.py kept).
-
-  python positioning_grid.py                 # 4H, 180 bars, ~3840 px wide; prints PNG path + POSGRID_JSON line
-  python positioning_grid.py --tf 1H --bars 180 --out x.png
-
-Panels (BTC price on each; L/S ratios shown as long−short deltas in %, Daniel 2026-10-14): 1 多空差值（全部帳戶）OKX+Gate · 2 未平倉量 OKX+Gate ·
-3 OKX 大戶多空比 (account/position) · 4 Gate/Binance 大戶多空比 · 5 巨鯨 vs 散戶差值 ·
-6 Bitfinex 槓桿多空 · 7 Ahr999 (daily, computed from FRED CBBTCUSD + Kraken) · 8 資金費率.
-Data: data/positioning2.db (posdata.py, run every 15 min by run_collect.sh); OKX funding in the same db (positioning table).
-Freshness (2026-10-17, after the dead collector left OKX funding 46h stale): every run refreshes OKX realized funding live
-(btcsent.positioning.update, 1 page, OKX public funding-rate-history); OI/funding series older than their bar + 2h (
-OKX 8h funding 9h) trigger a live posdata refetch, and anything still stale is output as None, listed in POSGRID_JSON
-"stale" (old value + as-of) and in "fails", so it is never shown as current. "asof" gives each funding/OI timestamp.
-Descriptive only, no zones, no circles.
+"""BTC positioning overview (2×2 mobile-readable): leverage stack | whale vs retail | Bitfinex | Ahr999.
+Leverage stack (CoinGlass order): OKX perp OHLC → aggregate OI candles → futures CVD (OKX+Bitget raw taker)
+/ spot CVD (BN+OKX) → OI-weighted funding. No Binance fapi. Prints POSGRID_JSON + png path.
 """
 import argparse, io, json, os, sqlite3, sys, time
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_ROOT = os.path.dirname(_HERE) if os.path.basename(_HERE) == "scripts" else _HERE
+sys.path.insert(0, _ROOT)
+sys.path.insert(0, os.path.join(_ROOT, "scripts"))
+
 import numpy as np, pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
-from matplotlib.ticker import FuncFormatter, MaxNLocator
+from matplotlib.ticker import FuncFormatter, MaxNLocator, MaxNLocator
 from PIL import Image
 from btcsent.common import connect, OUT_DIR
 from btcsent.price import bucket_start, get_klines
 from btcsent.positioning import load as load_okx_pos, pos_con
 
-ROOT = os.path.dirname(os.path.abspath(__file__))
+ROOT = _ROOT
 PDB = os.path.join(ROOT, "data", "positioning2.db"); MDB = os.path.join(ROOT, "data", "macro.db")
 TZ = ZoneInfo("Asia/Taipei")
 STEP = {"1H": 3600, "4H": 14400, "1D": 86400}
@@ -144,14 +137,14 @@ def style(ax):
     for sp in ax.spines.values():
         sp.set_visible(False)
     ax.grid(axis="y", color=TH["grid"], lw=0.7); ax.grid(axis="x", visible=False)
-    ax.tick_params(labelsize=9.5)
+    ax.tick_params(labelsize=11)
 
 
 def add_price(ax, kl, w, label=True):
     axp = ax.twinx(); axp.set_facecolor("none")
     for sp in axp.spines.values():
         sp.set_visible(False)
-    axp.plot(num(kl.index) + w / 2, kl.c, color=TH["price"], lw=1.4, alpha=0.9, zorder=9)
+    axp.plot(num(kl.index) + w / 2, kl.c, color=TH["price"], lw=2.2, alpha=0.95, zorder=9)
     lo, hi = kl.l.min(), kl.h.max(); pad = (hi - lo) * 0.08
     axp.set_ylim(lo - pad, hi + pad)
     axp.yaxis.set_major_formatter(FuncFormatter(lambda v, _=None: f"{v/1000:.0f}K" if hi > 2e5 else f"{v/1000:.1f}K"))
@@ -159,11 +152,30 @@ def add_price(ax, kl, w, label=True):
     return axp
 
 
+def end_tag(ax, series, fmt, color, dy=0):
+    """曲線／柱末端右側標最新值（手機對齊 CoinGlass）。"""
+    if series is None or len(series) == 0:
+        return
+    s = series.dropna()
+    if s.empty:
+        return
+    x = num([s.index[-1]])[0]
+    y = float(s.iloc[-1]) + dy
+    ax.annotate(
+        fmt.format(y),
+        xy=(x, y), xytext=(6, 0), textcoords="offset points",
+        fontsize=11, fontweight="bold", color=color, va="center",
+        bbox=dict(boxstyle="round,pad=0.2", fc="#1a1d24", ec=color, lw=0.7, alpha=0.9),
+        clip_on=False, zorder=15,
+    )
+
+
 def head(ax, title, value, expl, src):
-    ax.text(0, 1.17, title, transform=ax.transAxes, fontsize=16, fontweight="bold", color=TH["title"], va="bottom")
-    ax.text(1, 1.17, value, transform=ax.transAxes, fontsize=13, fontweight="bold", color=TH["text"], ha="right", va="bottom")
-    ax.text(0, 1.085, expl, transform=ax.transAxes, fontsize=10.5, color=TH["muted"], va="bottom")
-    ax.text(0, -0.11, src, transform=ax.transAxes, fontsize=8.5, color=TH["muted"], va="top")
+    # 手機可讀：標題伸出縮短，避免與 fig 總標題／鄰格重疊
+    ax.text(0, 1.10, title, transform=ax.transAxes, fontsize=16, fontweight="bold", color=TH["title"], va="bottom")
+    ax.text(1, 1.10, value, transform=ax.transAxes, fontsize=13, fontweight="bold", color=TH["text"], ha="right", va="bottom")
+    ax.text(0, 1.03, expl, transform=ax.transAxes, fontsize=11, color=TH["muted"], va="bottom")
+    ax.text(0, -0.10, src, transform=ax.transAxes, fontsize=9, color=TH["muted"], va="top")
 
 
 def _cglegend(ax, items, fs=10):
@@ -180,7 +192,7 @@ def legend(ax, items):
     _cglegend(ax, items)
 
 
-def stepline(ax, s, w, col, lw=1.6, fill=False):
+def stepline(ax, s, w, col, lw=2.0, fill=False):
     if s is None or s.empty:
         return
     x = num(s.index); xe = np.append(x, x[-1] + w); y = np.append(s.values, s.values[-1])
@@ -197,7 +209,7 @@ def lsdelta(r):
 def deltabars(ax, s, w, line=None, line_col=None):
     """Green/red bars around 0 (whale-vs-retail style) + optional comparison line."""
     if s is not None and not s.empty:
-        ax.bar(num(s.index), s.values, width=w * 0.85, align="edge", color=np.where(s.values >= 0, TH["up"], TH["down"]), alpha=0.85, lw=0, zorder=3)
+        ax.bar(num(s.index), s.values, width=w * 0.88, align="edge", color=np.where(s.values >= 0, TH["up"], TH["down"]), alpha=0.9, lw=0, zorder=3)
     if line is not None and not line.empty:
         stepline(ax, line, w, line_col, lw=1.5)
     ax.axhline(0, color=TH["muted"], lw=0.9, zorder=2)
@@ -235,11 +247,135 @@ def bn_mark(ax, s, w, col=BN_COL):
 BN_LAST = None
 
 
+
+
+def _in_tag(ax, y, text, color, fontsize=10):
+    """單元格內右側最新值標籤（避免超出 subplot 被裁切）。"""
+    ax.text(
+        0.99, y, text, transform=ax.get_yaxis_transform(),
+        fontsize=fontsize, fontweight="bold", color=color,
+        va="center", ha="right",
+        bbox=dict(boxstyle="round,pad=0.22", fc="#1a1d24", ec=color, lw=0.8, alpha=0.92),
+        clip_on=False, zorder=20,
+    )
+
+
+def draw_leverage_stack_cell(ax):
+    """右上角：價→OI合計K→CVD合計→OI加權費率（CoinGlass 序／配色）。"""
+    import leverage_cvd as L
+    from matplotlib.gridspec import GridSpecFromSubplotSpec
+    ss = ax.get_subplotspec()
+    fig = ax.figure
+    ax.remove()
+    inner = GridSpecFromSubplotSpec(4, 1, subplot_spec=ss, hspace=0.16, height_ratios=[1.4, 1.15, 1.35, 1.0])
+    axes = [fig.add_subplot(inner[i]) for i in range(4)]
+    for a in axes:
+        a.set_facecolor(TH["bg"])
+        for sp in a.spines.values():
+            sp.set_color(TH["grid"]); sp.set_linewidth(0.5)
+        a.tick_params(colors=TH["muted"], labelsize=9)
+        a.grid(True, color=TH["grid"], lw=0.5, alpha=0.8)
+
+    days = 10.0
+    hours = int(days * 24)
+    # v4：完整 OHLC + 合約 CVD 僅原始 taker
+    try:
+        candles, _pm = L.fetch_okx_perp_candles(hours + 5)
+    except Exception:
+        candles, _pm = L.fetch_bn_spot_ohlc(hours + 5)
+    if not candles:
+        raise RuntimeError("no OHLC candles for leverage stack")
+    price_by_ts = {int(c["ts"]): float(c["c"]) for c in candles}
+    start_ts = candles[0]["ts"]; end_ts = candles[-1]["ts"] + 3600
+    xlim = (
+        mdates.date2num(datetime.fromtimestamp(start_ts, timezone.utc)),
+        mdates.date2num(datetime.fromtimestamp(end_ts, timezone.utc)),
+    )
+
+    okx_f, okx_fm = L.fetch_okx_futures_cvd(hours + 10, price_by_ts=price_by_ts)
+    bitget_f, bitget_fm = L.fetch_bitget_futures_cvd(hours + 10, price_by_ts=price_by_ts)
+    fut, fut_meta = L.merge_delta_series([
+        ("OKX", okx_f, okx_fm), ("Bitget", bitget_f, bitget_fm),
+        ("Gate", [], {"kind": "excluded_estimate", "n": 0}),
+        ("Bybit", [], {"kind": "unavailable", "n": 0, "error": "無公開歷史 taker"}),
+    ])
+    bn_s, bn_sm = L.fetch_bn_spot_delta(hours + 10)
+    okx_s, okx_sm = L.fetch_okx_spot_delta(hours + 10, price_by_ts=price_by_ts)
+    cb_s, cb_sm = L.fetch_coinbase_spot_delta(hours + 10)
+    spot, spot_meta = L.merge_delta_series([
+        ("Binance", bn_s, bn_sm), ("OKX", okx_s, okx_sm), ("Coinbase", cb_s, cb_sm),
+    ])
+    oi_venues, _ = L.fetch_oi_venues(hours + 10)
+    for r in oi_venues.get("bybit") or []:
+        if not r.get("usd"):
+            px = price_by_ts.get(int(r["ts"])) or 0
+            r["usd"] = float(r.get("btc") or 0) * px
+    oi_candles, oi_meta = L.aggregate_oi_candles(oi_venues, price_by_ts, hours + 2)
+    oi_maps = {n: {int(r["ts"]): float(r.get("usd") or 0) for r in rows} for n, rows in oi_venues.items()}
+    fund, fund_meta = L.fetch_funding_oi_weighted(oi_maps, n=80)
+
+    fx, fy = L.cum_delta(fut, start_ts)
+    sx, sy = L.cum_delta(spot, start_ts)
+
+    a0 = axes[0]
+    L.draw_candles(a0, candles, width_days=1/24*0.65)
+    a0.set_xlim(*xlim)
+    lo = min(c["l"] for c in candles); hi = max(c["h"] for c in candles)
+    pad = (hi - lo) * 0.10; a0.set_ylim(lo - pad, hi + pad)
+    a0.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:,.0f}"))
+    a0.yaxis.set_major_locator(MaxNLocator(3))
+    _in_tag(a0, candles[-1]["c"], f"{candles[-1]['c']:,.0f}", TH["title"], 10)
+    a0.set_title("槓桿力道 · 價→OI→CVD→費率（10D·原始 taker）", fontsize=13, fontweight="bold", color=TH["title"], loc="left", pad=6)
+    a0.tick_params(labelbottom=False)
+
+    a1 = axes[1]
+    L.draw_candles(a1, oi_candles, width_days=1/24*0.65, up="#0ecb81", dn="#f6465d")
+    a1.set_xlim(*xlim)
+    if oi_candles:
+        lo = min(c["l"] for c in oi_candles); hi = max(c["h"] for c in oi_candles)
+        pad = (hi - lo) * 0.10 or 1e8
+        a1.set_ylim(lo - pad, hi + pad)
+        _in_tag(a1, oi_candles[-1]["c"]/1e9, f"OI ${oi_candles[-1]['c']/1e9:.2f}B", "#4c82fb", 9)
+    a1.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"${v/1e9:.1f}B"))
+    a1.tick_params(labelbottom=False)
+
+    a2 = axes[2]
+    if len(fx):
+        a2.plot(L.to_num(fx), fy/1e6, color="#4c82fb", lw=2.0, label="合約 "+"+".join(fut_meta.get("included") or []))
+        _in_tag(a2, fy[-1]/1e6, f"合約 {fy[-1]/1e6:+.1f}M", "#4c82fb", 9)
+    if len(sx):
+        a2.plot(L.to_num(sx), sy/1e6, color="#f0b90b", lw=2.0, label="現貨 "+"+".join(spot_meta.get("included") or []))
+        _in_tag(a2, sy[-1]/1e6, f"現貨 {sy[-1]/1e6:+.1f}M", "#f0b90b", 9)
+    a2.axhline(0, color=TH["muted"], lw=0.5); a2.set_xlim(*xlim)
+    a2.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:+.0f}M"))
+    a2.legend(loc="upper left", fontsize=8, frameon=False, labelcolor=TH["text"], ncol=1)
+    a2.tick_params(labelbottom=False)
+
+    a3 = axes[3]
+    fo = [r for r in fund if r["ts"] >= start_ts - 8*3600]
+    if fo:
+        xs = L.to_num([r["ts"] for r in fo]); ys = [r["pct"] for r in fo]
+        cols = [TH["up"] if y >= 0 else TH["down"] for y in ys]
+        a3.bar(xs, ys, width=7.5/24, align="center", color=cols, alpha=0.9)
+        _in_tag(a3, ys[-1], f"加權 {ys[-1]:+.4f}%", TH["up"] if ys[-1] >= 0 else TH["down"], 9)
+    a3.axhline(0, color=TH["muted"], lw=0.5); a3.set_xlim(*xlim)
+    a3.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:.3f}%"))
+    a3.xaxis.set_major_locator(mdates.DayLocator(interval=2, tz=TZ))
+    a3.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d", tz=TZ))
+    def _ft(ts):
+        return datetime.fromtimestamp(ts, TZ).strftime("%m/%d %H:%M") if ts else "—"
+    a3.text(0, -0.32,
+            f"CVD {_ft(fut_meta.get('start_ts'))}→{_ft(fut_meta.get('end_ts'))} · OI合計 {_ft(oi_meta.get('start_ts'))}→{_ft(oi_meta.get('end_ts'))} · 原始taker·非fapi",
+            transform=a3.transAxes, fontsize=8, color=TH["muted"], va="top")
+    return axes
+
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--tf", default="4H", choices=list(STEP)); ap.add_argument("--bars", type=int, default=180)
     ap.add_argument("--ahr-days", type=int, default=0)
-    ap.add_argument("--dpi", type=float, default=120); ap.add_argument("--font-scale", type=float, default=1.4)
+    ap.add_argument("--dpi", type=float, default=130); ap.add_argument("--font-scale", type=float, default=1.55)
     ap.add_argument("--out")
     a = ap.parse_args()
     step = STEP[a.tf]; now = time.time(); w = step / 86400
@@ -262,61 +398,32 @@ def main():
     plt.rcParams.update({"font.family": ["Noto Sans CJK TC", "DejaVu Sans"], "font.size": 10.5,
                          "text.color": TH["text"], "xtick.color": TH["muted"], "ytick.color": TH["muted"]})
     fs = a.font_scale
-    fig = plt.figure(figsize=(32 / fs, 30 / fs), dpi=a.dpi * fs, facecolor=TH["bg"])
-    gs = fig.add_gridspec(4, 2, left=0.04, right=0.955, top=0.875, bottom=0.06, hspace=0.62, wspace=0.11)
-    axs = [fig.add_subplot(gs[i // 2, i % 2]) for i in range(8)]
+    # 2×2 — 槓桿堆疊 / 巨鯨vs散戶 / Bitfinex / Ahr999（移除全部帳戶、OKX大戶、BN/Gate大戶、獨立費率格）
+    fig = plt.figure(figsize=(30 / fs, 42 / fs), dpi=a.dpi * fs, facecolor=TH["bg"])
+    gs = fig.add_gridspec(2, 2, left=0.045, right=0.955, top=0.88, bottom=0.05, hspace=0.32, wspace=0.12,
+                          height_ratios=[1.55, 1.0])
+    axs = [fig.add_subplot(gs[i // 2, i % 2]) for i in range(4)]
     for ax in axs:
         style(ax)
     xlim = (num([start_b])[0], num([end_b])[0])
     last = lambda s: (float(s.iloc[-1]), datetime.fromtimestamp(int(s.index[-1]), TZ).strftime("%m/%d %H:%M")) if s is not None and not s.empty else (None, None)
     pctl = lambda s: float((s < s.iloc[-1]).mean() * 100)
 
-    # 1 all-account long−short delta
-    ax = axs[0]; o, g = lsdelta(S("okx", "ls_account")), lsdelta(S("gate", "ls_account"))
-    bg = lsdelta(BS("global_account"))
-    deltabars(ax, o, w, g, TH["b"]); stepline(ax, bg, w, BN_COL, lw=1.4); bn_mark(ax, bg, w)
-    lim = max(abs(v) for v in ax.get_ylim()); 
-    if not bg.empty: lim = max(lim, float(np.nanmax(np.abs(bg.values))) * 1.15); ax.set_ylim(-lim, lim)
-    ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _=None: f"{v:+.0f}%" if abs(v) > 1e-9 else "0%"))
-    vo, vg = last(o)[0], last(g)[0]; cur["多空差值_全部_okx"], cur["多空差值_全部_gate"] = vo, vg
-    head(ax, "多空差值（全部帳戶）", f"OKX {vo:+.1f}% · Gate {vg:+.1f}%" if vo is not None and vg is not None else "資料不足",
-         "看法：例 56% 做多／44% 做空＝+12%。綠＝較多人做多；帳戶多的一方通常是散戶",
-         "來源：OKX rubik long-short-account-ratio-contract（柱）、Gate.io lsr_account（青線）、Binance futures/data globalLongShortAccountRatio（紫線，備援 data.binance.vision）")
-    legend(ax, [("OKX（柱）", TH["up"]), ("Gate", TH["b"]), (BN_LAB, BN_COL)]); add_price(ax, kl, w)
+    # 0 槓桿力道堆疊（多所合計）
+    ax = axs[0]
+    o, g = S("okx", "oi_usd"), S("gate", "oi_usd")
+    vo, vg = fresh("未平倉_okx_usd", o, tf_max(a.tf)), fresh("未平倉_gate_usd", g, tf_max(a.tf))
+    cur.update({"未平倉_okx_usd": vo, "未平倉_gate_usd": vg})
+    try:
+        draw_leverage_stack_cell(ax)
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        ax.text(0.5, 0.5, f"槓桿力道暫不可用\n{type(e).__name__}", transform=ax.transAxes,
+                ha="center", va="center", color=TH["down"], fontsize=12)
+        head(ax, "槓桿力道（暫不可用）", "見日誌", "降級", "—")
 
-    # 2 OI
-    ax = axs[1]; o, g = S("okx", "oi_usd"), S("gate", "oi_usd")
-    stepline(ax, o / 1e9, w, TH["a"], fill=True); stepline(ax, g / 1e9, w, TH["b"])
-    bo = BS("oi_usd"); stepline(ax, bo / 1e9, w, BN_COL, lw=1.4); bn_mark(ax, bo / 1e9, w)
-    ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _=None: f"${v:.1f}B"))
-    vo, vg = fresh("未平倉_okx_usd", o, tf_max(a.tf)), fresh("未平倉_gate_usd", g, tf_max(a.tf)); cur.update({"未平倉_okx_usd": vo, "未平倉_gate_usd": vg})
-    chg = (o.iloc[-1] / o.iloc[-7] - 1) * 100 if len(o) > 7 else float("nan")
-    head(ax, "未平倉量", (f"OKX \\${vo/1e9:.2f}B ({chg:+.1f}%/6根) · Gate \\${vg/1e9:.2f}B" if vo and vg else "資料不足"),
-         "看法：未平倉合約總值。價漲＋OI 增＝新資金追多；價跌＋OI 增＝加空；OI 急降＝平倉或爆倉", "來源：OKX open-interest-history、Gate.io contract_stats、Binance futures/data openInterestHist（備援 data.binance.vision）")
-    legend(ax, [("OKX", TH["a"]), ("Gate", TH["b"]), (BN_LAB, BN_COL)]); add_price(ax, kl, w)
-
-    # 3 / 4 top-trader long−short delta (bars = position, line = account)
-    for i, src, ttl, expl, srcl in ((2, "okx", "OKX 大戶多空差值", "看法：OKX 持倉值前 5% 大戶。柱＝大戶持倉（看金額，多單減空單部位占比）；藍線＝大戶帳戶（看人數，做多減做空帳戶占比），例 56%／44%＝+12%",
-                                     "來源：OKX rubik long-short-{position,account}-ratio-contract-top-trader (BTC-USDT-SWAP)"),
-                                    (3, "gate", "Binance / Gate 大戶多空差值", "看法：柱＝Gate 大戶持倉（看金額）、藍線＝Gate 大戶帳戶（看人數）；紫線＝Binance 大戶持倉（保證金前 20%，看金額）",
-                                     "來源：Gate.io contract_stats top_lsr_size / top_lsr_account（即時）、Binance futures/data topLongShortPositionRatio（備援 data.binance.vision）")):
-        ax = axs[i]; tp, ta = lsdelta(S(src, "top_ls_position")), lsdelta(S(src, "top_ls_account"))
-        deltabars(ax, tp, w, ta, TH["a"])
-        vp, va = last(tp)[0], last(ta)[0]; cur[f"多空差值_{src}_大戶持倉"], cur[f"多空差值_{src}_大戶帳戶"] = vp, va
-        val = f"持倉 {vp:+.1f}% · 帳戶 {va:+.1f}%" if vp is not None and va is not None else "資料不足"
-        items = [("持倉（柱）", TH["up"]), ("帳戶數", TH["a"])]
-        if src == "gate":
-            btp = lsdelta(BS("top_position")); stepline(ax, btp, w, BN_COL, lw=1.4); bn_mark(ax, btp, w)
-            if not btp.empty:
-                lim = max(max(abs(v) for v in ax.get_ylim()), float(np.nanmax(np.abs(btp.values))) * 1.15); ax.set_ylim(-lim, lim)
-                val = f"Gate 持倉 {vp:+.1f}% · 帳戶 {va:+.1f}% · Binance {float(btp.iloc[-1]):+.1f}%"
-            items = [("Gate 持倉（柱）", TH["up"]), ("Gate 帳戶數", TH["a"]), (BN_LAB, BN_COL)]
-        ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _=None: f"{v:+.0f}%" if abs(v) > 1e-9 else "0%"))
-        head(ax, ttl, val, expl, srcl)
-        legend(ax, items); add_price(ax, kl, w)
-
-    # 5 whale vs retail delta at grid tf (same style as other 多空差值 panels); daily value kept for JSON compat
-    ax = axs[4]
+    # 1 巨鯨 vs 散戶
+    ax = axs[1]
     try:
         wd = (S("okx", "top_ls_position") - S("okx", "ls_account")).dropna()
         bwd = (BS("top_position") - BS("global_account")).dropna()
@@ -331,14 +438,15 @@ def main():
         except Exception as e:
             fails.append(f"whale daily: {e!r}")
         head(ax, "巨鯨 vs 散戶差值", f"OKX {vw:+.3f} · {tw}" if vw is not None else "資料不足",
-             "看法：大戶持倉多空比 − 全部帳戶多空比。綠＝大戶比散戶偏多；紅＝散戶比大戶偏多。紫線＝Binance（Coinglass 同定義）",
-             "來源：OKX rubik top-trader position ratio − account ratio（柱）、Binance topLongShortPositionRatio − globalLongShortAccountRatio（紫線）")
+             "看法：大戶持倉比−散戶帳戶比。綠=大戶偏多；紫=Binance",
+             "來源：OKX rubik top−account（柱）、Binance top−global（紫線）")
         legend(ax, [("OKX 差值（柱）", TH["up"]), (BN_LAB, BN_COL)]); add_price(ax, kl, w)
+        end_tag(ax, wd, "{:+.2f}", TH["up"]); end_tag(ax, bwd, "{:+.2f}", BN_COL)
     except Exception as e:
         fails.append(f"whale delta: {e!r}"); head(ax, "巨鯨 vs 散戶差值", "繪製失敗", "", "")
 
-    # 6 Bitfinex margin long−short delta = (long − short)/(long + short) %
-    ax = axs[5]
+    # 2 Bitfinex
+    ax = axs[2]
     bl = series(con, "bitfinex", "long", "1H", start_b, end_b); bs = series(con, "bitfinex", "short", "1H", start_b, end_b)
     if a.tf != "1H" and not bl.empty:
         bl = bl.groupby(bucket_start(bl.index.to_numpy(), step)).last(); bs = bs.groupby(bucket_start(bs.index.to_numpy(), step)).last()
@@ -346,19 +454,20 @@ def main():
     deltabars(ax, bd, w)
     if not bd.empty:
         lo_, hi_ = float(bd.min()), float(bd.max()); pad = max(0.05, (hi_ - lo_) * 0.15)
-        ax.set_ylim(lo_ - pad, hi_ + pad)   # near +99%: zoom so changes are visible
+        ax.set_ylim(lo_ - pad, hi_ + pad)
         ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _=None: f"{v:+.2f}%"))
     vl, vs = last(bl)[0], last(bs)[0]; vd = last(bd)[0]
     cur["多空差值_bitfinex_pct"], cur["bitfinex_多_btc"], cur["bitfinex_空_btc"] = vd, vl, vs
     if vd is None:
         fails.append("bitfinex: no data")
     head(ax, "Bitfinex 槓桿多空差值", f"{vd:+.2f}% · 多 {vl:,.0f} / 空 {vs:,.0f} BTC" if vd is not None else "資料不足",
-         "看法：(多單 − 空單) ÷ (多單 + 空單)。Bitfinex 槓桿幾乎全是多單，所以看變化：下降＝空單增加或多單減少",
-         "來源：Bitfinex stats1 pos.size tBTCUSD long/short（1 分鐘資料重取樣）· 縱軸已放大，未從 0 起算")
+         "看法：近全多。看變化：下降＝空增或多減",
+         "來源：Bitfinex stats1 pos.size tBTCUSD long/short")
     add_price(ax, kl, w)
+    end_tag(ax, bd, "{:+.2f}%", TH["up"])
 
-    # 7 Ahr999 daily — full history, log scale (Coinglass style)
-    ax = axs[6]
+    # 3 Ahr999
+    ax = axs[3]
     try:
         ah = ahr999_series()
         if a.ahr_days > 0:
@@ -368,6 +477,7 @@ def main():
         ax.axhspan(1e-3, 0.45, color="#3a1a26", alpha=0.55, lw=0, zorder=1)
         ax.axhspan(0.45, 1.2, color="#131825", alpha=0.9, lw=0, zorder=1)
         ax.plot(x, ah.ahr, color=TH["c"], lw=1.0, zorder=4)
+        ax.annotate(f"{float(ah.ahr.iloc[-1]):.2f}", xy=(x[-1], float(ah.ahr.iloc[-1])), xytext=(6,0), textcoords="offset points", fontsize=12, fontweight="bold", color=TH["c"], va="center", bbox=dict(boxstyle="round,pad=0.2", fc="#1a1d24", ec=TH["c"], lw=0.7, alpha=0.9), clip_on=False, zorder=15)
         ax.fill_between(x, ah.ahr, 1e-3, color=TH["c"], alpha=0.10, lw=0, zorder=2)
         for lv, col in ((0.45, TH["red"]), (1.2, TH["green"])):
             ax.axhline(lv, color=col, lw=1.1, zorder=3)
@@ -389,37 +499,32 @@ def main():
         va = float(ah.ahr.iloc[-1]); cur["ahr999"] = round(va, 3); cur["ahr999_date"] = str(ah.index[-1].date())
         zone = "抄底區（<0.45）" if va < 0.45 else ("定投區（0.45–1.2）" if va <= 1.2 else "高於定投線（>1.2）")
         head(ax, "Ahr999 指數（日線，全歷史）", f"{va:.2f} · {zone} · {ah.index[-1]:%m/%d}",
-             "看法：<0.45＝歷史抄底區；0.45–1.2＝適合定投；>1.2＝偏貴。長線估值指標，不看短線",
-             "")
-        ax.text(0, -0.25, "計算：(價格÷200 日幾何平均)×(價格÷10^(5.84×log10(幣齡天數)−17.01)) · 價格：blockchain.info(2010–14)＋FRED CBBTCUSD＋Kraken · 對數座標", transform=ax.transAxes, fontsize=8.5, color=TH["muted"], va="top")
+             "看法：<0.45抄底；0.45–1.2定投；>1.2偏貴（長線）", "")
+        ax.text(0, -0.22, "計算：Ahr999 公式 · 對數座標", transform=ax.transAxes, fontsize=8.5, color=TH["muted"], va="top")
         _cglegend(ax, [("200日成本", TH["white"]), ("BTC 價格", TH["price"]), ("Ahr999", TH["c"]), ("抄底線 0.45", TH["red"]), ("定投線 1.2", TH["green"])], fs=9.5)
     except Exception as e:
         fails.append(f"ahr999: {e!r}"); head(ax, "Ahr999 指數（日線）", "計算失敗", "", "")
 
-    # 8 funding
-    ax = axs[7]
-    fo = load_okx_pos(pos_con(), "funding_realized", "8h", start_b, end_b) * 100
-    fg = S("gate", "funding") * 100
-    if not fo.empty:
-        ax.bar(num(fo.index), fo.values, width=8 / 24 * 0.8, align="edge", color=np.where(fo.values >= 0, TH["up"], TH["down"]), alpha=0.85, lw=0)
-    stepline(ax, fg, w, TH["b"], lw=1.3)
-    ax.axhline(0, color=TH["muted"], lw=0.7); ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _=None: f"{v:.3f}%"))
-    vo, vg = fresh("資金費率_okx_8h_pct", fo, FUND_OKX_MAX), fresh("資金費率_gate_pct", fg, tf_max(a.tf)); cur.update({"資金費率_okx_8h_pct": vo, "資金費率_gate_pct": vg})
-    head(ax, "資金費率", (f"OKX {vo:+.4f}%/8h" if vo is not None else "OKX —") + (f" · Gate {vg:+.4f}%" if vg is not None else ""),
-         "看法：正（綠）＝多方付錢給空方，多單擁擠；負（紅）＝空方付錢，空單擁擠", "來源：OKX 已結算資金費率（柱）、Gate.io last_funding_rate（青線）")
-    legend(ax, [("OKX", TH["up"]), ("Gate", TH["b"])]); add_price(ax, kl, w)
+    # still fetch funding into JSON for compat (not drawn as own cell — in stack)
+    try:
+        fo = load_okx_pos(pos_con(), "funding_realized", "8h", start_b, end_b) * 100
+        fg = S("gate", "funding") * 100
+        vo, vg = fresh("資金費率_okx_8h_pct", fo, FUND_OKX_MAX), fresh("資金費率_gate_pct", fg, tf_max(a.tf))
+        cur.update({"資金費率_okx_8h_pct": vo, "資金費率_gate_pct": vg})
+    except Exception as e:
+        fails.append(f"funding json: {e!r}")
 
     for i, ax in enumerate(axs):
-        if i != 6:
+        if i != 3:
             ax.set_xlim(*xlim); ax.yaxis.set_major_locator(MaxNLocator(5))
             ax.xaxis.set_major_locator(mdates.AutoDateLocator(tz=TZ, minticks=6, maxticks=12))
             ax.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d", tz=TZ))
     nowt = datetime.now(TZ)
-    fig.text(0.04, 0.972, "BTC 持倉數據", fontsize=30, fontweight="bold", color=TH["title"], va="center")
-    fig.text(0.04 + 0.13, 0.972, f"{a.tf} · {a.bars} 根（{a.bars*step/86400:g} 天）· BTC {kl.c.iloc[-1]/1000:.1f}K · 金線＝BTC 價格（{exch}）",
-             fontsize=16, color=TH["text"], va="center")
-    fig.text(0.955, 0.972, f"{nowt:%Y/%m/%d %H:%M} UTC+8", fontsize=16, color=TH["muted"], ha="right", va="center")
-    fig.text(0.04, 0.948, "全部為免費公開資料。持倉數據描述「誰站在哪邊」，尚未回測過預測力；Ahr999 為長線估值。", fontsize=12, color=TH["muted"], va="center")
+    # 標題區完全在 gridspec top=0.88 之上，與單元 head() 分離
+    fig.text(0.04, 0.978, "BTC 持倉數據", fontsize=24, fontweight="bold", color=TH["title"], va="top")
+    fig.text(0.955, 0.978, f"{nowt:%Y/%m/%d %H:%M} UTC+8", fontsize=14, color=TH["muted"], ha="right", va="top")
+    fig.text(0.04, 0.935, f"{a.tf} · {a.bars} 根（{a.bars*step/86400:g} 天）· BTC {kl.c.iloc[-1]/1000:.1f}K · 左上＝槓桿四層（價→OI→CVD→費率）· 多空僅留巨鯨/Bitfinex · 非 fapi",
+             fontsize=12, color=TH["muted"], va="top")
 
     out = a.out or str(OUT_DIR / "positioning" / f"btc_positioning_overview_{nowt:%Y%m%d_%H%M%S}.png")
     os.makedirs(os.path.dirname(out), exist_ok=True)
@@ -437,6 +542,13 @@ def main():
     cur["asof"], cur["stale"] = ASOF, STALE
     cur["btc"] = round(float(kl.c.iloc[-1]), 1); cur["fails"] = fails
     print("POSGRID_JSON " + json.dumps({k: (round(v, 6) if isinstance(v, float) else v) for k, v in cur.items()}, ensure_ascii=False))
+    try:
+        now_path = os.path.join(ROOT, "out", "posgrid_now.json")
+        os.makedirs(os.path.dirname(now_path), exist_ok=True)
+        with open(now_path, "w", encoding="utf-8") as f:
+            json.dump({k: (round(v, 6) if isinstance(v, float) else v) for k, v in cur.items()}, f, ensure_ascii=False)
+    except Exception as e:
+        print("posgrid_now write fail", e, file=sys.stderr)
 
 
 if __name__ == "__main__":
