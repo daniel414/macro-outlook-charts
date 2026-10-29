@@ -1,0 +1,14 @@
+name: media-token-check
+on: workflow_dispatch
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: check
+        env:
+          T: ${{ secrets.MEDIA_REPO_TOKEN }}
+        run: |
+          code=$(curl -s -o r.json -w "%{http_code}" -H "Authorization: Bearer $T" https://api.github.com/repos/daniel414/macro-outlook-media)
+          echo "status=$code"
+          python3 -c "import json;d=json.load(open('r.json'));print('push=',d.get('permissions',{}).get('push'))" || true
+          test "$code" = "200"
