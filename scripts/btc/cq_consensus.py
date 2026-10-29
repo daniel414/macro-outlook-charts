@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""CryptoQuant Analyst Consensus (consensus.cryptoquant.com, public key-free API) for /btc and /btckol.
+"""CryptoQuant Analyst Consensus numbers (consensus.cryptoquant.com, public key-free API) for /btc and /btckol.
   cq_consensus.py --fetch          # fetch now -> out/cq_consensus.json (BTC index + top-5 analysts' score and newest BTC call)
-  cq_consensus.py --line           # /btc section 【分析師共識】 (2 lines); refetches only if cache > MAX_AGE_H old (= once a day)
-  cq_consensus.py --kol            # /btckol block 【CryptoQuant 前 5 名分析師】
-Contrarian use of σ (z_score = 30d MA of the index vs its 90-day norm; the site colours z>=+0.8 bullish, z<=-1.5 bearish):
-  σ >= +1.5 明顯過熱 / >= +0.8 偏熱 -> 提醒可能太樂觀；σ <= -1.5 -> 共識極度悲觀（反向偏多）；otherwise 中性.
-Chinese one-line views for the 5 analysts are optional: out/cq_views_zh.json {handle: {"link": url, "zh": "..."}} written by the
-btc-3 routine; used only while the link matches the newest call, else the English excerpt is shown. Free data only, no key."""
+  cq_consensus.py --line           # /btc section 【分析師共識】; refetches only if cache > MAX_AGE_H old (= once a day)
+  cq_consensus.py --kol            # /btckol block 【CryptoQuant 前 5 名分析師】 (numbers + our take only)
+We only publish the public numbers (σ, bullish %, analyst count, date, stance, score) plus OUR OWN interpretation.
+Never paste or closely paraphrase CryptoQuant analyst post bodies / titles. Source line only: 資料來源：CryptoQuant 公開共識頁.
+Optional our takes: out/cq_views_zh.json {handle: {"link": url, "zh": "我們判讀…"}}; used only while link matches
+the newest call. Free data only, no key."""
 import html, json, os, re, sys, time, urllib.request
 from datetime import datetime, timezone, timedelta
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -16,6 +16,7 @@ TOP5 = ["benjamincowen", "IT_Tech_PL", "jjcmoreno", "10xresearch", "DonAlt"]
 MAX_AGE_H = 24; HARD_MAX_H = 72
 HOT, HOT2, COLD = 0.8, 1.5, -1.5
 TW = timezone(timedelta(hours=8))
+SRC = "資料來源：CryptoQuant 公開共識頁"
 def get(url, js=True):
     r = urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 btc-sentiment"}), timeout=30).read().decode()
     return json.loads(r) if js else r
@@ -31,6 +32,7 @@ def latest_call(page_url):
         except Exception: continue
         if not lab: continue
         body = json.loads(m.group(3)) if m.group(3) != "null" else (json.loads(m.group(2)) if m.group(2) != "null" else "")
+        # excerpt kept in cache for internal use only; never printed by line()/kol()
         c = {"link": m.group(1), "published_at": m.group(4), "stance": lab[0]["sentiment"], "excerpt": html.unescape(re.sub(r"\s+", " ", body or "")).strip()[:200]}
         if not best or c["published_at"] > best["published_at"]: best = c
     return best
@@ -61,17 +63,30 @@ def load(auto=True):
     if age > HARD_MAX_H: return None
     return json.load(open(CACHE))
 def verdict(z):
-    if z >= HOT2: return "明顯過熱：共識一面倒看多，反向指標提醒可能太樂觀"
-    if z >= HOT: return "偏熱：共識偏樂觀，反向指標提醒留意過度樂觀"
-    if z <= COLD: return "極度悲觀：共識一面倒看空，反向指標偏多"
-    return "中性：共識未過熱也未極度悲觀"
+    """Our own reading of σ; not CryptoQuant site copy."""
+    if z >= HOT2:
+        return "市場分析師整體一面倒偏多，歷史上這種程度常伴隨短線過熱，留意回檔風險"
+    if z >= HOT:
+        return "市場分析師整體明顯偏多，歷史上這種程度常伴隨短線過熱，留意回檔"
+    if z <= COLD:
+        return "市場分析師整體極度偏空，歷史上這種程度常出現過度悲觀，逆向偏多訊號"
+    return "市場分析師多空分歧大致平衡，未見明顯過熱或極度悲觀"
+def stance_take(stance):
+    """Fallback our take from stance label only — never quote post text."""
+    return {
+        "bullish": "我們判讀：立場看多",
+        "bearish": "我們判讀：立場看空",
+        "bullish_nuance": "我們判讀：立場偏多",
+        "bearish_nuance": "我們判讀：立場偏空",
+    }.get(stance, "我們判讀：立場不明")
 def line():
     d = load()
     if not d: return ""
     c = d["consensus"]; z = c["z_score"]; dt = (c.get("date") or "")[5:].replace("-", "/")
     return "\n".join(["【分析師共識】",
-        f"・CryptoQuant 共識指數 σ {z:+.2f}（{dt}）｜看多 {c.get('bullish_percent')}%｜{c.get('total_analysts')} 位分析師",
-        f"・{verdict(z)}（σ≥+{HOT} 偏熱、≥+{HOT2} 過熱）"])
+        f"・共識指數 σ {z:+.2f}（{dt}）｜看多 {c.get('bullish_percent')}%｜{c.get('total_analysts')} 位分析師",
+        f"・{verdict(z)}",
+        f"・{SRC}"])
 def kol():
     d = load()
     if not d or not d.get("analysts"): return ""
@@ -79,14 +94,17 @@ def kol():
     except Exception: zh = {}
     try: mine = {x["handle"].lower() for x in json.load(open(os.path.join(HERE, "kol/latest_view.json")))["accounts"]}   # read-only, dedupe
     except Exception: mine = set()
-    L = ["【CryptoQuant 前 5 名分析師】", "・分數為 CryptoQuant 準確度分數（0–100，相對排名），不是勝率"]
+    L = ["【CryptoQuant 前 5 名分析師】",
+         f"・分數為準確度分數（0–100，相對排名），不是勝率；{SRC}"]
     for a in d["analysts"]:
         la = a.get("latest") or {}; s = {"bullish": "看多", "bearish": "看空", "bullish_nuance": "偏多", "bearish_nuance": "偏空"}.get(la.get("stance"), "-")
         dt = la.get("published_at", "")[5:10].replace("-", "/")
         if a["handle"].lower() in mine:
             L.append(f"・{a['handle']}｜CQ 分數 {a.get('score')}｜已在追蹤名單，觀點見【各分析師】"); continue
         z = zh.get(a["handle"]) or {}
-        v = z["zh"] if z.get("zh") and z.get("link") == la.get("link") else (la.get("excerpt") or "")[:90].rstrip() + ("…" if len(la.get("excerpt") or "") > 90 else "")
+        # only our own summary in zh (must start with 我們判讀); never English excerpt / verbatim translation
+        zh_ok = z.get("zh") and z.get("link") == la.get("link") and str(z.get("zh")).startswith("我們判讀")
+        v = z["zh"] if zh_ok else stance_take(la.get("stance"))
         L.append(f"・{a['handle']}｜CQ 分數 {a.get('score')}｜{s}（{dt}）｜{v}")
     return "\n".join(L)
 if __name__ == "__main__":
