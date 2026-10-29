@@ -22,9 +22,11 @@ concurrency:
   group: fallback-onchain
   cancel-in-progress: false
 env:
+  # Content in private macro-outlook-media; needs repo secret MEDIA_REPO_TOKEN.
   TZ: Asia/Taipei
-  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  GH_CHARTS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  GH_TOKEN: ${{ secrets.MEDIA_REPO_TOKEN }}
+  GH_CHARTS_TOKEN: ${{ secrets.MEDIA_REPO_TOKEN }}
+  GHR_OVERRIDE: daniel414/macro-outlook-media
   ONCHAIN_DUE: "06:30"
 jobs:
   fallback:
