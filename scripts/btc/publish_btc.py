@@ -18,7 +18,9 @@ try:
 except OSError: pass
 GHR = os.environ.get("GHR_OVERRIDE") or GHR
 KEEP = 120  # ~1 week (16 runs/day)
-def H(): return {"Authorization": "Bearer " + os.environ["GH_CHARTS_TOKEN"], "Accept": "application/vnd.github+json"}
+def H():
+    t = os.environ.get("MEDIA_REPO_TOKEN") or os.environ["GH_CHARTS_TOKEN"]
+    return {"Authorization": "Bearer " + t, "Accept": "application/vnd.github+json"}
 API = f"https://api.github.com/repos/{GHR}/contents/"
 def gh_put(path, data, msg):
     g = requests.get(API + path, headers=H(), timeout=60)
@@ -34,10 +36,10 @@ def check(u, ct="image/jpeg"):
     r = requests.get(u, timeout=60); ok = r.status_code == 200 and r.headers.get("content-type", "").startswith(ct)
     print("check", u, r.status_code, r.headers.get("content-type"), len(r.content), file=sys.stderr); return ok
 def pinned(sha, path):
-    # Private-repo safe: verify via Contents API with GH_CHARTS_TOKEN, still write the raw sha URL (Worker rewrites it to a signed /img/ URL).
+    # Private-repo safe: verify via Contents API with MEDIA_REPO_TOKEN (fallback GH_CHARTS_TOKEN), still write the raw sha URL (Worker rewrites it to a signed /img/ URL).
     raw = f"https://raw.githubusercontent.com/{GHR}/{sha}/{path}"
-    if not os.environ.get("GH_CHARTS_TOKEN"):
-        print("WARN pinned: GH_CHARTS_TOKEN not set, cannot verify " + path + ", using raw URL anyway", file=sys.stderr); return raw
+    if not (os.environ.get("MEDIA_REPO_TOKEN") or os.environ.get("GH_CHARTS_TOKEN")):
+        print("WARN pinned: MEDIA_REPO_TOKEN/GH_CHARTS_TOKEN not set, cannot verify " + path + ", using raw URL anyway", file=sys.stderr); return raw
     for _ in range(3):
         try:
             r = requests.get(API + path, params={"ref": sha}, headers=H(), timeout=60)
