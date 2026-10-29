@@ -6,7 +6,7 @@ Writes stale=true|false to $GITHUB_OUTPUT. FORCE=1 forces stale=true."""
 import json, os, sys, urllib.request
 from datetime import datetime, timedelta, timezone
 TZ = timezone(timedelta(hours=8))
-repo = os.environ["GITHUB_REPOSITORY"]; tok = os.environ["GH_TOKEN"]
+repo = os.environ.get("GHR_OVERRIDE") or os.environ["GITHUB_REPOSITORY"]; tok = os.environ["GH_TOKEN"]
 def get(path):
     r = urllib.request.Request(f"https://api.github.com/repos/{repo}/contents/{path}", headers={"Authorization": f"Bearer {tok}", "Accept": "application/vnd.github.raw+json", "User-Agent": "fallback-check"})
     return json.load(urllib.request.urlopen(r, timeout=60))
