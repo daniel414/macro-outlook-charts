@@ -214,6 +214,25 @@ def short_bias(r, d, h4):
         nxt = [x for x in down if x < inv * 0.992][:1] or [rn(inv * 0.98)]
         fail = f"4H 收盤跌破 {n0(inv)} 視為假突破，轉看 {n0(nxt[0])}"
     return dict(bias=bias, score=sc, targets=tg, fail=fail, ma20=ma20)
+def levels_dict(price=None):
+    """Single source of short-term levels for forecast / 摘要 / 完整數據 解讀 (Daniel batch 2026-10-30)."""
+    r = analyse(price); sb = short_bias(r, _CACHE["d"], _CACHE["h4"])
+    m = re.findall(r"([\d,]{5,})", sb["fail"])
+    inv = int(m[0].replace(",", "")) if m else None
+    nxt = int(m[1].replace(",", "")) if len(m) > 1 else None
+    tg = [int(round(x)) for x in sb["targets"]]
+    tgs = "、".join(n0(x) for x in tg)
+    invs, nxts = (n0(inv) if inv else ""), (n0(nxt) if nxt else "")
+    if sb["bias"] == "偏空":
+        watch = f"短線仍偏空先看 {tgs}；4H 收盤站回 {invs} 視為假跌破，轉看 {nxts}"
+        sp = f"支撐 {tgs}｜壓力 {invs}" + (f"、{nxts}" if nxts else "")
+        fc_inv = f"4H 收回 {invs}" + (f"，轉看 {nxts}" if nxts else "")
+    else:
+        watch = f"短線仍偏多先看 {tgs}；4H 收盤跌破 {invs} 視為假突破，轉看 {nxts}"
+        sp = f"壓力 {tgs}｜支撐 {invs}" + (f"、{nxts}" if nxts else "")
+        fc_inv = f"4H 跌破 {invs}" + (f"，轉看 {nxts}" if nxts else "")
+    return dict(bias=sb["bias"], score=sb["score"], targets=tg, inv=inv, nxt=nxt,
+                fail=sb["fail"], watch=watch, support_pressure=sp, forecast_invalid=fc_inv, price=r["price"])
 def rvw_line():
     import subprocess
     try:
@@ -466,9 +485,9 @@ def forecast_compact(price=None):
     L = ["BTC 走勢預測", f"{tw.strftime('%Y.%m.%d %H:%M')} (UTC+8)｜BTC {n0(px)}"]
     # 短線
     sb = short_bias(r, d, h4)
-    inv = re.search(r"([\d,]{5,})", sb["fail"]); inv = inv.group(1) if inv else ""
+    slv = levels_dict(px)  # short-term levels; single source for 摘要/數據
     L += ["", "【短線】數天"]
-    L.append(f"方向：{sb['bias']}｜目標 {'、'.join(n0(x) for x in sb['targets'])}｜失效：4H 收回 {inv}")
+    L.append(f"方向：{sb['bias']}｜目標 {'、'.join(n0(x) for x in sb['targets'])}｜失效：{slv['forecast_invalid']}")
     s1 = [f"模型{sb['bias']}"]
     if _fav("short"): s1.append("鋒哥：" + _fav("short"))
     s1.append(f"分析師 {cnt['偏多']} 偏多、{cnt['中性']} 中性、{cnt['偏空']} 偏空" + (f"，共同支撐 {'、'.join(kl['支撐'][:3])}" if kl.get("支撐") else ""))
@@ -503,6 +522,8 @@ if __name__ == "__main__":
     try:
         p = None
         if "--price" in sys.argv: p = float(sys.argv[sys.argv.index("--price") + 1])
+        if "--levels" in sys.argv:
+            print(json.dumps(levels_dict(p), ensure_ascii=False)); sys.exit(0)
         if "--forecast-compact" in sys.argv:
             t = forecast_compact(p); print(t)
             with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "out/publish/forecast_compact_draft.txt"), "w") as fh: fh.write(t)

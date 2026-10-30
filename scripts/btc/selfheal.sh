@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Self-check before each /btc routine run. Restores missing scripts from daniel414/macro-outlook-charts scripts/btc,
-# recreates out/ dirs, rebuilds .venv, restarts the collector. Never overwrites a local file that differs from repo.
+# refreshes out/repo_state/onchain_latest.json from private macro-outlook-media, recreates out/ dirs, rebuilds .venv,
+# restarts the collector. Never overwrites a local file that differs from repo.
 # Output: one "SELFHEAL ..." summary line; "WARN ..." lines on failure.
 cd "$(dirname "$0")"
 export TZ=Asia/Taipei
@@ -10,7 +11,7 @@ SYNC="btc_structure.py ls_section.py posdata.py positioning_grid.py range_body.p
 LOCALONLY="publish_btc.py config.json"   # repo copy is the GitHub Actions fallback / older calibration: restore only if missing
 fixed=(); diff=(); warn=0
 w(){ echo "WARN selfheal: $*"; warn=1; }
-rm -rf "$TMP"; git clone -q --depth 1 "$REPO" "$TMP" 2>/dev/null || w "repo clone failed"
+rm -rf "$TMP"; timeout 60 git clone -q --depth 1 "$REPO" "$TMP" 2>/dev/null || w "repo clone failed"
 R="$TMP/scripts/btc"
 for f in $SYNC $LOCALONLY; do
   if [ ! -f "$f" ]; then
@@ -29,13 +30,47 @@ for f in cryptochan_signals.py cryptochan/LIVE.json; do
     else w "onchain/$f missing and not in repo"; fi
   fi
 done
-# onchain_latest.json (STH on-chain data used by Binance Square posts and onchain analysis): restore/refresh from repo btc/
+# onchain_latest.json lives in private macro-outlook-media (not public charts). Fetch via Contents API.
+# Scripts SYNC/differ still use charts clone above. Tokens from env or local .env (never printed).
+[ -f .env ] && set -a && . ./.env && set +a
 mkdir -p out/repo_state; OJ=out/repo_state/onchain_latest.json
-if [ -f "$TMP/btc/onchain_latest.json" ]; then
-  if [ ! -f "$OJ" ]; then cp "$TMP/btc/onchain_latest.json" "$OJ" && fixed+=("restored:$OJ") || w "restore $OJ failed"
-  elif ! cmp -s "$OJ" "$TMP/btc/onchain_latest.json"; then cp "$TMP/btc/onchain_latest.json" "$OJ"; fi
-else [ -f "$OJ" ] || w "$OJ missing and not in repo"; fi
+fetch_media_onchain() {
+  python3 - "$OJ" <<'PY'
+import json, os, sys, base64, urllib.request
+out = sys.argv[1]
+tok = os.environ.get("MEDIA_REPO_TOKEN") or os.environ.get("GH_CHARTS_TOKEN") or ""
+if not tok:
+    sys.stderr.write("no token\n"); sys.exit(2)
+req = urllib.request.Request(
+    "https://api.github.com/repos/daniel414/macro-outlook-media/contents/btc/onchain_latest.json",
+    headers={"Authorization": "Bearer " + tok, "Accept": "application/vnd.github+json", "User-Agent": "btc-selfheal"},
+)
+with urllib.request.urlopen(req, timeout=60) as r:
+    meta = json.load(r)
+data = base64.b64decode(meta["content"])
+j = json.loads(data)
+if "date" not in j:
+    sys.stderr.write("bad onchain json\n"); sys.exit(3)
+tmp = out + ".tmp"
+open(tmp, "wb").write(data)
+os.replace(tmp, out)
+print(j["date"])
+PY
+}
+if OJ_DATE=$(fetch_media_onchain); then
+  fixed+=("onchain:media:$OJ_DATE")
+else
+  # fallback: charts clone path (usually absent after media split)
+  if [ -f "$TMP/btc/onchain_latest.json" ]; then
+    if [ ! -f "$OJ" ]; then cp "$TMP/btc/onchain_latest.json" "$OJ" && fixed+=("restored:$OJ") || w "restore $OJ failed"
+    elif ! cmp -s "$OJ" "$TMP/btc/onchain_latest.json"; then cp "$TMP/btc/onchain_latest.json" "$OJ"; fi
+  else
+    [ -f "$OJ" ] || w "$OJ missing (media fetch failed and not in charts)"
+    w "media onchain fetch failed (using local if present)"
+  fi
+fi
 [ -f "$OJ" ] && { age=$(( ($(date +%s)-$(date -d "$(python3 -c "import json;print(json.load(open('$OJ'))['date'])" 2>/dev/null || echo 1970-01-01)" +%s))/3600 )); [ $age -le 30 ] || w "onchain_latest.json stale ${age}h"; }
+
 [ -d btcsent ] || { cp -r "$R/btcsent" btcsent 2>/dev/null && fixed+=("restored:btcsent") || w "btcsent missing"; }
 for d in out out/positioning out/publish out/grid out/kol; do [ -d "$d" ] || { mkdir -p "$d"; fixed+=("mkdir:$d"); }; done
 if ! .venv/bin/python -c "import requests,numpy,pandas,matplotlib,PIL,bs4" 2>/dev/null; then

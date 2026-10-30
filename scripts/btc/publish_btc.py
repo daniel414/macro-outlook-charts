@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Publish BTC positioning overview + summary to GitHub (macro-outlook-charts/btc/) for the LINE /BTC command.
+"""Publish BTC positioning overview + summary to GitHub (macro-outlook-media/btc/) for the LINE /BTC command.
 Usage:
   publish_btc.py                 # run positioning_grid.py now, auto summary, upload
   publish_btc.py --image X.png --json posgrid.json [--text summary.txt]
@@ -10,8 +10,8 @@ from datetime import datetime
 import requests
 from PIL import Image
 HERE = os.path.dirname(os.path.abspath(__file__))
-GHR = "daniel414/macro-outlook-charts"
-# box-only file; on GitHub Actions (fallback) it is absent -> GHR_OVERRIDE or the default above
+GHR = "daniel414/macro-outlook-media"  # default media (Daniel 2026-10-29); charts is scripts-only
+# Override order: GHR_OVERRIDE env > line_push.py literal > default media
 try:
     src = open("/workspace/big-players/line_push.py").read()
     m = re.search(r'GHR="([^"]+)"', src); GHR = m.group(1) if m else GHR
@@ -322,8 +322,44 @@ def add_fengge(text):
         return (t[:i] + blk + t[i:] if i >= 0 else t + blk)[:4900]
     except Exception as e:
         print("fengge skipped:", e, file=sys.stderr); return text
+def fetch_levels(price=None):
+    """fengge_section.py --levels (script, never import). Single source for short-term numbers across 摘要/完整數據/走勢預測."""
+    try:
+        cmd = [sys.executable, os.path.join(HERE, "fengge_section.py"), "--levels"]
+        if price is not None: cmd += ["--price", str(int(float(str(price).replace(",", ""))))]
+        out = subprocess.run(cmd, cwd=HERE, capture_output=True, text=True, timeout=60).stdout.strip()
+        for ln in reversed(out.splitlines()):
+            if ln.startswith("{"): return json.loads(ln)
+    except Exception as e:
+        print("levels skipped:", e, file=sys.stderr)
+    return None
+def align_levels(text, lv):
+    """Patch 解讀 short-term clause + 支撐｜壓力 line so they match short_bias (lv from fetch_levels)."""
+    if not text or not lv: return text
+    watch = lv.get("watch") or ""
+    sp = lv.get("support_pressure") or ""
+    if watch:
+        def _jiedu(m):
+            pre = m.group(1).rstrip("；。，、 \t")
+            body = (pre + "；" if pre else "") + watch
+            if not body.endswith("。"): body += "。"
+            return "解讀：" + body
+        text = re.sub(r"解讀：(.*?)短線仍偏[^\n]*", _jiedu, text)
+    if sp:
+        text = re.sub(r"(?m)^支撐\s+[^\n]*｜壓力\s+[^\n]*$", sp, text)
+    return text
+def align_forecast(fc, lv):
+    """Force forecast 【短線】失效 line to lv['forecast_invalid'] (same short_bias as 摘要/數據)."""
+    if not fc or not lv or not lv.get("forecast_invalid"): return fc
+    return re.sub(
+        r"(【短線】數天\n方向：偏[多空]｜目標 [^｜\n]+｜失效：)[^\n]+",
+        lambda m: m.group(1) + lv["forecast_invalid"],
+        fc, count=1)
+SUMMARY_SEND = os.path.join(HERE, "out/publish/summary_send.txt")
+LEAD_SEND = os.path.join(HERE, "out/publish/lead_send.txt")
 FORECAST_IN_SUMMARY = False   # Worker sends forecast_parts as separate messages (2026-10-24 17:44)
 FORECAST_FILE = os.path.join(HERE, "out/publish/forecast_send.txt")
+
 MODEL_RE = r"\n*" + re.escape(DIV) + r"\n【(?:短線)?交易模型】.*?(?=\n\n" + re.escape(DIV) + r"\n|\Z)"
 def strip_model(text):
     """Drop 【交易模型】 from the data message (it now lives in forecast_text)."""
@@ -473,9 +509,16 @@ def main():
     else: sys.exit("need --text or --json (or run without args)")
     text = apply_chainlink(text, j.get("btc") if j else None)
     text = add_notes(strip_hl(add_binance(add_fengge(add_consensus(add_longshort(add_rvw(add_range(add_structure(text)))))))))
+    # Single source of short-term levels (short_bias) for 摘要 / 完整數據 解讀 / 走勢預測
+    _pm = re.search(r"｜BTC ([\d,]+(?:\.\d+)?)", "\n".join(text.splitlines()[:3]))
+    lv = fetch_levels(_pm.group(1) if _pm else (j.get("btc") if j else None))
+    if lv: print("LEVELS", json.dumps({k: lv[k] for k in ("bias","targets","inv","nxt","forecast_invalid","support_pressure") if k in lv}, ensure_ascii=False), file=sys.stderr)
+    text = align_levels(text, lv)
     fc = build_forecast(text)
+    if fc: fc = align_forecast(fc, lv)
     if fc: fc = add_src(fc)
     if fc: text = strip_model(text)
+    lead = align_levels(lead_text(), lv)
     stamp = when.strftime("%Y%m%d_%H%M")
     os.makedirs(os.path.join(HERE, "out/publish"), exist_ok=True)
     big = os.path.join(HERE, f"out/publish/btc_positioning_{stamp}.jpg"); pre = big[:-4] + "_preview.jpg"
@@ -492,19 +535,23 @@ def main():
         if os.path.getsize(pre) < 0.95e6 or q < 40: break
         q -= 10
     print("built", big, os.path.getsize(big), pre, os.path.getsize(pre), file=sys.stderr)
+    # Always overwrite send files (Daniel batch 2026-10-30) — even on --dry-run so trials can inspect
     with open(FORECAST_FILE, "w") as fh: fh.write(fc)
+    with open(SUMMARY_SEND, "w") as fh: fh.write(text)
+    with open(LEAD_SEND, "w") as fh: fh.write(lead)
     fparts = write_forecast_parts(fc)
     merged = merge_summary(fc, text) != text
     print(text)
     print("FORECAST_FILE", FORECAST_FILE, len(fc), "parts", [len(x) for x in fparts], "merged_into_summary", merged, file=sys.stderr)
+    print("SEND_FILES", SUMMARY_SEND, LEAD_SEND, FORECAST_FILE, file=sys.stderr)
     if a.dry_run: return
     n1 = "btc/" + os.path.basename(big); n2 = "btc/" + os.path.basename(pre)
     u1 = pinned(gh_put(n1, open(big, "rb").read(), "btc chart " + stamp), n1)
     u2 = pinned(gh_put(n2, open(pre, "rb").read(), "btc preview " + stamp), n2)
-    d = {"date": when.strftime("%Y-%m-%d %H:%M"), "summary_text": merge_summary(fc, text), "forecast_text": fc, "forecast_parts": fparts, "forecast_merged": merged, "change_text": change_text(), "lead_text": lead_text(), "image_url": u1, "preview_url": u2, "price_source": PRICE.get("source", "")}
+    d = {"date": when.strftime("%Y-%m-%d %H:%M"), "summary_text": merge_summary(fc, text), "forecast_text": fc, "forecast_parts": fparts, "forecast_merged": merged, "change_text": change_text(), "lead_text": lead, "image_url": u1, "preview_url": u2, "price_source": PRICE.get("source", "")}
     publish_kol(when, stamp)
     gh_put("btc/latest.json", json.dumps(d, ensure_ascii=False, indent=1).encode(), "btc latest " + stamp)
-    print("PUBLISHED", u1, u2, file=sys.stderr)
+    print("PUBLISHED", u1, u2, "GHR", GHR, file=sys.stderr)
     try: prune()
     except Exception as e: print("prune fail", e, file=sys.stderr)
 if __name__ == "__main__": main()

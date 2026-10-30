@@ -514,6 +514,16 @@ def main():
     except Exception as e:
         fails.append(f"funding json: {e!r}")
 
+    # still fetch OKX/Gate 多空差值 into JSON for /btc【多空差值】compat (not drawn; layout stays 2×2)
+    try:
+        o_all, g_all = lsdelta(S("okx", "ls_account")), lsdelta(S("gate", "ls_account"))
+        cur["多空差值_全部_okx"], cur["多空差值_全部_gate"] = last(o_all)[0], last(g_all)[0]
+        for src in ("okx", "gate"):
+            tp, ta = lsdelta(S(src, "top_ls_position")), lsdelta(S(src, "top_ls_account"))
+            cur[f"多空差值_{src}_大戶持倉"], cur[f"多空差值_{src}_大戶帳戶"] = last(tp)[0], last(ta)[0]
+    except Exception as e:
+        fails.append(f"ls delta json: {e!r}")
+
     for i, ax in enumerate(axs):
         if i != 3:
             ax.set_xlim(*xlim); ax.yaxis.set_major_locator(MaxNLocator(5))
