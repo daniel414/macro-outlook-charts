@@ -4,105 +4,111 @@
   "id": "1835749639380779008",
   "name": "Killa",
   "followers": 235725,
-  "since_id": "2115910800905035843"
+  "since_id": "2117065042545786955"
  },
  {
   "username": "WallStreet0Name",
   "id": "1871880526774366208",
   "name": "华尔街没有名字",
   "followers": 87554,
-  "since_id": "2115761518835077180"
+  "since_id": "2116844321693638886"
  },
  {
   "username": "Murphychen888",
   "id": "972652952098762752",
   "name": "Murphy",
   "followers": 81525,
-  "since_id": "2115771708972098018"
+  "since_id": "2117090686701093176"
  },
  {
   "username": "0xCryptoChan",
   "id": "1442829413729538049",
   "name": "CryptoChan 熊猫",
   "followers": 67637,
-  "since_id": "2115620485157511604"
+  "since_id": "2116011127633330413"
  },
  {
   "username": "market_beggar",
   "id": "1731924572474400768",
   "name": "貝格先生🐢",
   "followers": 20183,
-  "since_id": "2115622440944771273"
+  "since_id": "2117070496714146209"
  },
  {
   "username": "benjamincowen",
   "id": "943506806931734528",
   "name": "Benjamin Cowen",
   "followers": 1266267,
-  "since_id": "2115900549380059587"
+  "since_id": "2117114878276379079"
  },
  {
   "username": "rektcapital",
   "id": "918122676195090433",
   "name": "Rekt Capital",
   "followers": 562779,
-  "since_id": "2115914578995679581"
+  "since_id": "2116973097668772215"
  },
  {
   "username": "damskotrades",
   "id": "1004687124141150208",
   "name": "CryptoAmsterdam",
   "followers": 139362,
-  "since_id": "2115926423458414635"
+  "since_id": "2117193541101514984"
  },
  {
   "username": "KrownCryptoCave",
   "id": "807022837777203201",
   "name": "Krown",
   "followers": 110248,
-  "since_id": "2115919504102551958"
+  "since_id": "2117112716607308131"
  },
  {
   "username": "qinbafrank",
   "id": "1338075202798809089",
   "name": "qinbafrank",
   "followers": 160464,
-  "since_id": "2115837630961316001"
+  "since_id": "2117185573823857132"
  },
  {
   "username": "jstin0502",
   "id": "1255552976740990977",
   "name": "jstin",
   "followers": 2525,
-  "since_id": "2115829516342059430"
+  "since_id": "2117130832641225162"
  },
  {
-  "username": "xtony1314",
+  "username": "xy_xtony",
   "id": "1589272961235619840",
-  "name": "逍遥XTony（2分钟版）",
-  "followers": 125239,
-  "since_id": "2115794009990078761"
+  "name": "托尼老師／逍遥XTony",
+  "followers": 129361,
+  "since_id": "2117175775028039795",
+  "aliases": [
+   "XiaoYao_Capital"
+  ],
+  "telegram": "https://t.me/XiaoYao_Cap",
+  "telegram_preview": "https://t.me/s/XiaoYao_Cap",
+  "note": "原誤用 username xtony1314（同 id）；官方另有 @XiaoYao_Capital 與 TG 頻道"
  },
  {
   "username": "RektProof",
   "id": "1094038634297085952",
   "name": "RektProof.",
   "followers": 270883,
-  "since_id": "2115922507111043367"
+  "since_id": "2116384573793951995"
  },
  {
   "username": "SailorManCrypto",
   "id": "1682349437622931456",
   "name": "Popeye",
   "followers": 24283,
-  "since_id": "2115914078296342967"
+  "since_id": "2117212967938806269"
  },
  {
   "username": "traderfengge",
   "id": "1475509783302008834",
   "name": "Traderfengge",
   "followers": 5224,
-  "since_id": "2112014903200645604"
+  "since_id": "2117083866666295559"
  },
  {
   "username": "0xPickleCati",
@@ -116,6 +122,22 @@
   "id": "28754022",
   "name": "paulwei",
   "followers": 69428,
-  "since_id": "2115778204959113231"
+  "since_id": "2117183398053908689"
+ },
+ {
+  "username": "XiaoYao_Capital",
+  "id": "1982744692489170944",
+  "name": "XiaoYao Capital（托尼老師資金號）",
+  "followers": 11745,
+  "since_id": "2116158971086282880",
+  "owner": "xy_xtony",
+  "note": "托尼老師官方資金／公告號；BTC 觀點以 @xy_xtony 與 TG 為主"
+ },
+ {
+  "username": "zemummy1",
+  "id": "1450839697069019137",
+  "name": "十老板",
+  "followers": 37979,
+  "since_id": "2117167035650310199"
  }
 ]

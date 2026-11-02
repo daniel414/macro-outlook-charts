@@ -108,7 +108,11 @@ def lead_text():
     try:
         if time.time() - os.path.getmtime(LEAD_FILE) > 3 * 3600: return ""  # stale: skip
         t = strip_hl(EMOJI.sub("", open(LEAD_FILE).read()).strip())
-        if PRICE.get("old") and PRICE.get("new"): t = t.replace(PRICE["old"], PRICE["new"])
+        # Always sync lead price to Chainlink new (not only when lead happens to contain PRICE["old"])
+        if PRICE.get("new"):
+            t = re.sub(r"BTC [\d,]+(?:\.\d+)?", "BTC " + PRICE["new"], t, count=1)
+        elif PRICE.get("old") and PRICE.get("new"):
+            t = t.replace(PRICE["old"], PRICE["new"])
         return t[:4900]
     except Exception:
         return ""
@@ -159,7 +163,7 @@ X_HANDLE = {"benjamincowen": "benjamincowen", "Benjamin Cowen": "benjamincowen",
             "KrownCryptoCave": "KrownCryptoCave", "Krown": "KrownCryptoCave", "KillaXBT": "KillaXBT", "Killa": "KillaXBT",
             "SailorManCrypto": "SailorManCrypto", "SailorMan": "SailorManCrypto", "Murphychen888": "Murphychen888", "Murphy": "Murphychen888",
             "market_beggar": "market_beggar", "qinbafrank": "qinbafrank", "0xCryptoChan": "0xCryptoChan", "damskotrades": "damskotrades",
-            "rektcapital": "rektcapital", "RektProof": "RektProof", "WallStreet0Name": "WallStreet0Name", "jstin0502": "jstin0502", "xtony1314": "xtony1314"}
+            "rektcapital": "rektcapital", "RektProof": "RektProof", "WallStreet0Name": "WallStreet0Name", "jstin0502": "jstin0502", "xy_xtony": "xy_xtony", "XiaoYao_Capital": "XiaoYao_Capital", "zemummy1": "zemummy1", "十老板": "zemummy1"}
 def xh_name(h):
     return "鋒哥" if h == "traderfengge" else "@" + X_HANDLE.get(h, h)
 def xh(text):
@@ -227,17 +231,24 @@ def summary(j, when):
     # Lead sections, in order: 1 分析師觀點, 2 持倉變化; then the positioning sections.
     for lead in (change_section,):   # analyst views moved to /analyst (btc/kol_latest.json)
         L += lead(sec)
-    L += sec("【多空差值】",
-             f"・全部帳戶：OKX {pct(g('多空差值_全部_okx'))}｜Gate {pct(g('多空差值_全部_gate'))}",
-             f"・大戶持倉：OKX {pct(g('多空差值_okx_大戶持倉'))}｜Gate {pct(g('多空差值_gate_大戶持倉'))}",
-             f"・大戶帳戶：OKX {pct(g('多空差值_okx_大戶帳戶'))}｜Gate {pct(g('多空差值_gate_大戶帳戶'))}")
-    w = g('巨鯨散戶差_okx_4H')
-    mean = "" if w is None else ("｜大戶較散戶偏多" if w > 0 else "｜大戶較散戶偏空" if w < 0 else "｜大戶與散戶持平")
-    L += sec("【巨鯨 vs 散戶】", f"・OKX {f1(w, 2)}{mean}")
+    # 【散戶 vs 大戶】 skeleton (add_rvw fills exchange bullets; agent --text supplies prose when available)
+    L += sec("【散戶 vs 大戶】",
+             "散戶：",
+             "・全體帳戶：",
+             "",
+             "大戶：",
+             "・大戶持倉：",
+             "・大戶帳戶：",
+             "・巨鯨散戶差：",
+             "",
+             "解讀：短線仍偏多。")
     def oi(name, k):
         c = g(k.replace("_usd", "_24h_pct"))
         return f"{name} {busd(g(k))}" + (f" ({pct(c)} 24h)" if c is not None else "")
-    L += sec("【未平倉量】", "・" + "｜".join([oi("OKX", "未平倉_okx_usd"), oi("Gate", "未平倉_gate_usd")]))
+    oi_parts = []
+    if g("binance_未平倉_usd") is not None: oi_parts.append(oi("Binance", "binance_未平倉_usd"))
+    oi_parts += [oi("Gate", "未平倉_gate_usd"), oi("OKX", "未平倉_okx_usd")]
+    L += sec("【未平倉量】", "・" + "｜".join(oi_parts))
     L += sec("【資金費率】",
              f"・每 8h：OKX {pct(g('資金費率_okx_8h_pct'),4)}｜Gate {pct(g('資金費率_gate_pct'),4)}")
     L += sec("【Bitfinex 槓桿】",
@@ -334,19 +345,24 @@ def fetch_levels(price=None):
         print("levels skipped:", e, file=sys.stderr)
     return None
 def align_levels(text, lv):
-    """Patch 解讀 short-term clause + 支撐｜壓力 line so they match short_bias (lv from fetch_levels)."""
+    """Patch 摘要短線方向 + 解讀 short-term clause + 支撐｜壓力 so they match short_bias (lv from fetch_levels)."""
     if not text or not lv: return text
+    bias = lv.get("bias") or ""
     watch = lv.get("watch") or ""
     sp = lv.get("support_pressure") or ""
+    # 摘要 first line: BTC X，短線震盪/偏多/偏空 → same bias as forecast
+    if bias:
+        text = re.sub(r"(BTC [\d,]+(?:\.\d+)?，)短線(?:震盪|偏多|偏空)", r"\1短線" + bias, text, count=1)
     if watch:
         def _jiedu(m):
             pre = m.group(1).rstrip("；。，、 \t")
             body = (pre + "；" if pre else "") + watch
             if not body.endswith("。"): body += "。"
             return "解讀：" + body
-        text = re.sub(r"解讀：(.*?)短線仍偏[^\n]*", _jiedu, text)
+        # Match 短線仍偏 / 短線偏 / 短線傾向偏 (agent prose varies)
+        text = re.sub(r"解讀：(.*?)短線(?:仍|傾向)?偏[^\n]*", _jiedu, text)
     if sp:
-        text = re.sub(r"(?m)^支撐\s+[^\n]*｜壓力\s+[^\n]*$", sp, text)
+        text = re.sub(r"(?m)^(?:支撐\s+[^\n]*｜壓力\s+[^\n]*|壓力\s+[^\n]*｜支撐\s+[^\n]*)$", sp, text)
     return text
 def align_forecast(fc, lv):
     """Force forecast 【短線】失效 line to lv['forecast_invalid'] (same short_bias as 摘要/數據)."""

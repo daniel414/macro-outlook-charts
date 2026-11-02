@@ -441,7 +441,7 @@ X_HANDLE = {"benjamincowen": "benjamincowen", "Benjamin Cowen": "benjamincowen",
             "KrownCryptoCave": "KrownCryptoCave", "Krown": "KrownCryptoCave", "KillaXBT": "KillaXBT", "Killa": "KillaXBT",
             "SailorManCrypto": "SailorManCrypto", "SailorMan": "SailorManCrypto", "Murphychen888": "Murphychen888", "Murphy": "Murphychen888",
             "market_beggar": "market_beggar", "qinbafrank": "qinbafrank", "0xCryptoChan": "0xCryptoChan", "damskotrades": "damskotrades",
-            "rektcapital": "rektcapital", "RektProof": "RektProof", "WallStreet0Name": "WallStreet0Name", "jstin0502": "jstin0502", "xtony1314": "xtony1314"}
+            "rektcapital": "rektcapital", "RektProof": "RektProof", "WallStreet0Name": "WallStreet0Name", "jstin0502": "jstin0502", "xy_xtony": "xy_xtony", "XiaoYao_Capital": "XiaoYao_Capital", "zemummy1": "zemummy1", "十老板": "zemummy1"}
 def xh_name(h):
     return "鋒哥" if h == "traderfengge" else "@" + X_HANDLE.get(h, h)
 def xh(text):
