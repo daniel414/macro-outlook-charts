@@ -263,21 +263,50 @@ def summary(j, when):
     t = EMOJI.sub("", "\n".join(L))[:4900]
     assert not EMOJI.search(t)
     return t
-def publish_kol(when, stamp):
-    """Analyst image + btc/kol_latest.json only. Never touches btc/latest.json."""
+def publish_kol(when, stamp, require=False):
+    """Analyst image(s) + btc/kol_latest.json only. Never touches btc/latest.json.
+    Phone layout may yield 2 PNGs. Worker still reads kol_image_url/kol_preview_url (page 1).
+    Extra pages go to kol_image_url_2 / kol_images (forward-compatible). On render/layout/overlap
+    failure: do not upload; keep previous kol_latest. If require=True ( --kol-only ), re-raise/exit."""
     os.makedirs(os.path.join(HERE, "out/publish"), exist_ok=True)
-    try:   # analyst image (kol_chart.py, run as subprocess); optional
-        kp = subprocess.run([os.path.join(HERE, ".venv/bin/python"), os.path.join(HERE, "kol_chart.py")], cwd=HERE, capture_output=True, text=True, timeout=120).stdout.strip().splitlines()
-        if kp and kp[-1].endswith(".png"):
-            ki = Image.open(kp[-1]).convert("RGB"); kb = os.path.join(HERE, f"out/publish/btc_kol_{stamp}.jpg"); ki.save(kb, "JPEG", quality=90, optimize=True)
-            kq = ki.copy(); kq.thumbnail((1024, 1024)); kpv = kb[:-4] + "_preview.jpg"; kq.save(kpv, "JPEG", quality=85, optimize=True)
+    try:
+        r = subprocess.run([os.path.join(HERE, ".venv/bin/python"), os.path.join(HERE, "kol_chart.py")],
+                           cwd=HERE, capture_output=True, text=True, timeout=180)
+        if r.stderr:
+            print(r.stderr.rstrip(), file=sys.stderr)
+        if r.returncode != 0:
+            raise RuntimeError(f"kol_chart exit {r.returncode} (layout/overlap failed; kept previous kol_latest)")
+        paths = [ln.strip() for ln in r.stdout.splitlines() if ln.strip().endswith(".png")]
+        if not paths:
+            raise RuntimeError("kol_chart produced no PNG paths")
+        uploaded = []
+        for i, png in enumerate(paths, 1):
+            ki = Image.open(png).convert("RGB")
+            tag = f"_p{i}" if len(paths) > 1 else ""
+            kb = os.path.join(HERE, f"out/publish/btc_kol_{stamp}{tag}.jpg")
+            ki.save(kb, "JPEG", quality=90, optimize=True)
+            kq = ki.copy(); kq.thumbnail((1024, 1024))
+            kpv = kb[:-4] + "_preview.jpg"; kq.save(kpv, "JPEG", quality=85, optimize=True)
             m1 = "btc/" + os.path.basename(kb); m2 = "btc/" + os.path.basename(kpv)
-            k = {"date": when.strftime("%Y-%m-%d %H:%M"), "kol_text": kol_text(),
-                 "kol_image_url": pinned(gh_put(m1, open(kb, "rb").read(), "btc kol " + stamp), m1),
-                 "kol_preview_url": pinned(gh_put(m2, open(kpv, "rb").read(), "btc kol preview " + stamp), m2)}
-            gh_put("btc/kol_latest.json", json.dumps(k, ensure_ascii=False, indent=1).encode(), "btc kol latest " + stamp)
+            u1 = pinned(gh_put(m1, open(kb, "rb").read(), "btc kol " + stamp + tag), m1)
+            u2 = pinned(gh_put(m2, open(kpv, "rb").read(), "btc kol preview " + stamp + tag), m2)
+            uploaded.append({"page": i, "image_url": u1, "preview_url": u2, "local_jpg": kb, "local_png": png})
+        # Worker-compatible primary fields = page 1; extras for multi-image clients
+        k = {"date": when.strftime("%Y-%m-%d %H:%M"), "kol_text": kol_text(),
+             "kol_image_url": uploaded[0]["image_url"],
+             "kol_preview_url": uploaded[0]["preview_url"],
+             "kol_images": [{"image_url": u["image_url"], "preview_url": u["preview_url"], "page": u["page"]} for u in uploaded]}
+        if len(uploaded) > 1:
+            k["kol_image_url_2"] = uploaded[1]["image_url"]
+            k["kol_preview_url_2"] = uploaded[1]["preview_url"]
+        gh_put("btc/kol_latest.json", json.dumps(k, ensure_ascii=False, indent=1).encode(), "btc kol latest " + stamp)
+        print("KOL_IMAGES", len(uploaded), *[u["local_jpg"] for u in uploaded], file=sys.stderr)
+        return uploaded
     except Exception as e:
         print("kol image skipped:", e, file=sys.stderr)
+        if require:
+            raise
+        return None
 def add_structure(text):
     """Insert the objective structure section (btc_structure.py, run as a script) before 【Binance…】, else at the end.
     Title 【技術結構】 (old title 【技術結構（客觀數據，非投資建議）】 also recognised): any existing structure block is
@@ -504,7 +533,10 @@ def main():
     a = argparse.ArgumentParser(); a.add_argument("--image"); a.add_argument("--json"); a.add_argument("--text"); a.add_argument("--dry-run", action="store_true"); a.add_argument("--kol-text", action="store_true", help="print /btckol text only"); a.add_argument("--kol-only", action="store_true", help="only analyst image + btc/kol_latest.json"); a = a.parse_args()
     if a.kol_text: print(kol_text()); return   # print /btckol text only, no upload
     if a.kol_only:
-        now = datetime.now(); publish_kol(now, now.strftime("%Y%m%d_%H%M"))
+        now = datetime.now(); stamp = now.strftime("%Y%m%d_%H%M")
+        uploaded = publish_kol(now, stamp, require=True)
+        if not uploaded:
+            sys.exit("kol publish failed; previous kol_latest kept")
         try: prune_one("btc_kol_")
         except Exception as e: print("prune fail", e, file=sys.stderr)
         print("KOL_PUBLISHED", file=sys.stderr); return

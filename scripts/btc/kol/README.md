@@ -21,3 +21,5 @@ Cost: one get_users_posts per top-level account in kol_accounts.json, plus one p
 YouTube（鋒哥 traderfengge，頻道 UCqKGLcPxejYCq0rKN51sDJg @Traderfengge）：每次 KOL 更新先跑 python3 youtube_check.py
   -> 有新影片會轉錄（字幕優先，沒有就 faster-whisper small，float32；int8 在本機出亂碼）到 youtube/<id>.txt 並列入 youtube/pending.json
   -> 讀轉錄摘 BTC 方向/價位/理由，寫 summary.json 後跑 python3 youtube_apply.py summary.json（更新 latest_view.json traderfengge 條目、stance_history、標記完成）
+
+Phone image layout (live 2026-11-02): kol_chart.py renders 1–2 pages (safe pad 700/500, atomic token wrap, kinsoku, single-line stance labels, one-level-per-line common levels). Auto-condenses levels/reason/stance from latest_view.json. Layout + overlap checks must PASS or the run exits non-zero and publish_btc keeps the previous kol_latest. Worker still uses kol_image_url (page 1); page 2 is kol_image_url_2 / kol_images[].
