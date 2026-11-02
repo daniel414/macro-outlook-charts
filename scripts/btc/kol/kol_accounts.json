@@ -79,15 +79,21 @@
  {
   "username": "xy_xtony",
   "id": "1589272961235619840",
-  "name": "托尼老師／逍遥XTony",
+  "name": "托尼老師",
   "followers": 129361,
   "since_id": "2117175775028039795",
   "aliases": [
-   "XiaoYao_Capital"
+   {
+    "username": "XiaoYao_Capital",
+    "id": "1982744692489170944",
+    "name": "XiaoYao Capital（托尼老師資金號）",
+    "followers": 11745,
+    "since_id": "2116158971086282880"
+   }
   ],
   "telegram": "https://t.me/XiaoYao_Cap",
   "telegram_preview": "https://t.me/s/XiaoYao_Cap",
-  "note": "原誤用 username xtony1314（同 id）；官方另有 @XiaoYao_Capital 與 TG 頻道"
+  "note": "托尼老師：@xy_xtony 主帳＋別名 @XiaoYao_Capital（資金／公告號）＋TG t.me/s/XiaoYao_Cap；BTC／觀點一律併入本列，不另開分析師列"
  },
  {
   "username": "RektProof",
@@ -123,15 +129,6 @@
   "name": "paulwei",
   "followers": 69428,
   "since_id": "2117183398053908689"
- },
- {
-  "username": "XiaoYao_Capital",
-  "id": "1982744692489170944",
-  "name": "XiaoYao Capital（托尼老師資金號）",
-  "followers": 11745,
-  "since_id": "2116158971086282880",
-  "owner": "xy_xtony",
-  "note": "托尼老師官方資金／公告號；BTC 觀點以 @xy_xtony 與 TG 為主"
  },
  {
   "username": "zemummy1",
