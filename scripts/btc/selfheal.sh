@@ -11,7 +11,14 @@ SYNC="btc_structure.py ls_section.py posdata.py positioning_grid.py range_body.p
 LOCALONLY="publish_btc.py config.json"   # repo copy is the GitHub Actions fallback / older calibration: restore only if missing
 fixed=(); diff=(); warn=0
 w(){ echo "WARN selfheal: $*"; warn=1; }
-rm -rf "$TMP"; timeout 60 git clone -q --depth 1 "$REPO" "$TMP" 2>/dev/null || w "repo clone failed"
+# charts repo still holds large historical btc/*.jpg (~500MB tarball); full clone hangs/times out on this box.
+# Sparse + blobless fetch of scripts/btc only (~2MB) — same approach Actions checkout uses.
+rm -rf "$TMP"
+if ! timeout 90 git -c credential.helper= clone -q --depth 1 --filter=blob:none --sparse "$REPO" "$TMP" 2>/dev/null; then
+  w "repo clone failed"
+elif ! (cd "$TMP" && timeout 60 git -c credential.helper= sparse-checkout set scripts/btc >/dev/null 2>&1); then
+  w "repo clone failed"
+fi
 R="$TMP/scripts/btc"
 for f in $SYNC $LOCALONLY; do
   if [ ! -f "$f" ]; then
