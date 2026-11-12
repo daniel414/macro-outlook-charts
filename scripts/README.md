@@ -4,7 +4,7 @@ Grok Bot 用量用完、box 暫停時，讓 LINE 指令的非 AI 內容繼續更
 
 | workflow | 排程（UTC+8） | 過期規則 | 寫入 |
 |---|---|---|---|
-| fallback-btc | 每小時 :35 | btc/latest.json：bot 發佈 ≥ 80 分鐘，或備援自己發佈 ≥ 50 分鐘 | btc/btc_positioning_*.jpg、btc/latest.json（加 `source: github-actions-fallback`、`ai_text_from`） |
+| fallback-btc | 每天 07:35、12:35、18:35 | btc/latest.json：上次發佈（bot 或備援）早於當天 06:00，或已超過 26 小時；同一天內不重複寫 | btc/btc_positioning_*.jpg、btc/latest.json（加 `source: github-actions-fallback`、`ai_text_from`） |
 | fallback-onchain | 每天 08:40、12:40 | btc/onchain_latest.json 早於當天 06:30 | btc/btc_onchain_*.jpg、btc/onchain_latest.json |
 
 - 腳本是 box 上 `/workspace/btc-sentiment/` 的原檔複製（posdata.py、positioning_grid.py、whale_delta_chart.py、btcsent/、config.json、onchain/update_onchain.py 完全相同；publish_btc.py 只改了讀 box 專用檔 `/workspace/big-players/line_push.py` 那一行）。box 上的腳本改了，請同步複製到這裡。

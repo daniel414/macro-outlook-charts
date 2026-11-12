@@ -20,9 +20,10 @@ from zoneinfo import ZoneInfo
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.dirname(HERE))  # scripts/ — check_stale.py
 TZ = ZoneInfo("Asia/Taipei")
-BOT_MAX_AGE_MIN = int(os.environ.get("BOT_MAX_AGE_MIN", 65))      # bot publishes hourly at ~:05-:13 (UTC+8); 65 catches ~66-min gaps
-SELF_MAX_AGE_MIN = int(os.environ.get("SELF_MAX_AGE_MIN", 50))    # after our own publish: refresh hourly
+BOT_MAX_AGE_MIN = int(os.environ.get("BOT_MAX_AGE_MIN", 1560))    # 26h; bot publishes daily ~06:04–06:19 (UTC+8)
+SELF_MAX_AGE_MIN = int(os.environ.get("SELF_MAX_AGE_MIN", 1560))  # same cap: do not rewrite again the same day after our own publish
 AI_CARRY_H = 3
 SOURCE = "github-actions-fallback"
 OUT = os.path.join(HERE, "out", "fallback")
@@ -45,11 +46,9 @@ def parse_tp(s):  # "2026-10-17 22:08" in UTC+8
 
 
 def staleness(cur, now=None):
-    now = now or datetime.now(TZ)
-    age = (now - parse_tp(cur["date"])).total_seconds() / 60
-    mine = cur.get("source") == SOURCE
-    lim = SELF_MAX_AGE_MIN if mine else BOT_MAX_AGE_MIN
-    return age >= lim, age, mine, lim
+    # Same rule as scripts/check_stale.py: last publish (bot or fallback) before today's 06:00, or age >= 26h.
+    import check_stale as CS
+    return CS.btc_staleness(cur, now)
 
 
 # ---------- data bootstrap (same sources and row formats as the box collector) ----------

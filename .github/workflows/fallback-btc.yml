@@ -1,15 +1,13 @@
-# FALLBACK for LINE /btc. Bitcoin Analysis (Grok Bot) stays the primary publisher (hourly ~:05-:13 UTC+8).
-# This only publishes when btc/latest.json is stale: bot publish >= 65 min old, or our own fallback publish >= 50 min old.
-# Private repo: keep monthly Actions minutes under the free 2000. FRESH runs bill ~1 min each.
-# Flat every-15-min (4/h) would be ~2880 min/mo; hybrid stays ~1800 + buffer for STALE/onchain.
+# FALLBACK for LINE /btc. Bitcoin Analysis (Grok Bot) stays the primary publisher (daily ~06:04–06:19 UTC+8).
+# This only publishes when today's daily update is missing: last btc/latest.json (bot or fallback)
+# is before 06:00 UTC+8, or older than 26 hours. Cron runs a few times a day so a miss is filled at most once.
 name: fallback-btc
 on:
   schedule:
-    # Quiet hours Taipei 00–05 (UTC 16–21): every 15 min — overnight cron drops caused the 10/29 05:xx miss
-    - cron: "7,22,37,52 16-21 * * *"
-    # Active hours Taipei 06–23 (UTC 22–15): every 30 min at :22 and :52 (65-min threshold after bot :05–:13)
-    - cron: "22,52 22-23 * * *"
-    - cron: "22,52 0-15 * * *"
+    # Taipei 07:35, 12:35, 18:35 — after the daily bot window (~06:04–06:19), plus two later chances
+    - cron: "35 23 * * *"   # 07:35 UTC+8
+    - cron: "35 4 * * *"    # 12:35 UTC+8
+    - cron: "35 10 * * *"   # 18:35 UTC+8
   workflow_dispatch:
     inputs:
       mode:
@@ -22,7 +20,7 @@ on:
         type: boolean
         default: false
       simulate_stale:
-        description: "test: pretend btc/latest.json is 120 min old (forces dry-run, no writes)"
+        description: "test: pretend btc/latest.json is 27h old (forces dry-run, no writes)"
         type: boolean
         default: false
 permissions:
@@ -36,8 +34,9 @@ env:
   GH_TOKEN: ${{ secrets.MEDIA_REPO_TOKEN }}
   GH_CHARTS_TOKEN: ${{ secrets.MEDIA_REPO_TOKEN }}
   GHR_OVERRIDE: daniel414/macro-outlook-media
-  BOT_MAX_AGE_MIN: "65"
-  SELF_MAX_AGE_MIN: "50"
+  BOT_MAX_AGE_MIN: "1560"     # 26h unified cap (bot or fallback)
+  SELF_MAX_AGE_MIN: "1560"
+  BTC_DUE: "06:00"            # Taipei; last publish before today's due => today's daily /btc missed
 jobs:
   fallback:
     runs-on: ubuntu-24.04
@@ -52,7 +51,7 @@ jobs:
       - id: check
         env:
           FORCE: ${{ (github.event_name == 'workflow_dispatch' && inputs.force) && '1' || '0' }}
-          SIMULATE_AGE_MIN: ${{ (github.event_name == 'workflow_dispatch' && inputs.simulate_stale) && '120' || '' }}
+          SIMULATE_AGE_MIN: ${{ (github.event_name == 'workflow_dispatch' && inputs.simulate_stale) && '1620' || '' }}
         run: python3 scripts/check_stale.py btc
       - if: steps.check.outputs.stale == 'true' || (github.event_name == 'workflow_dispatch' && (inputs.mode == 'dry-run' || inputs.simulate_stale))
         uses: ./.github/actions/setup-render
