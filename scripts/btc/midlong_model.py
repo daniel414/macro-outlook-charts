@@ -336,32 +336,36 @@ def _parse_onchain_text(text: str) -> dict:
     m = re.search(r"目前週期位置：([^\n]+)", text)
     if m:
         out["cycle"] = m.group(1).strip().rstrip("。")
-    m = re.search(r"前高是\s*(\d{4})/(\d{1,2})/(\d{1,2})\s*的\s*([\d,]+)", text)
+    m = re.search(r"前高[是在]\s*(\d{4})/(\d{1,2})/(\d{1,2})\s*的\s*([\d,]+)", text)
     if m:
         out["ath"] = float(m.group(4).replace(",", ""))
         out["ath_date"] = f"{int(m.group(1))}/{int(m.group(2))}/{int(m.group(3))}"
-    m = re.search(r"這輪低點是\s*(\d{4})/(\d{1,2})/(\d{1,2})\s*的\s*([\d,]+)", text)
+    m = re.search(r"這輪(?:目前的)?低點是\s*(\d{4})/(\d{1,2})/(\d{1,2})\s*的\s*([\d,]+)", text)
     if m:
         out["onchain_low"] = float(m.group(4).replace(",", ""))
         out["onchain_low_date"] = f"{int(m.group(1))}/{int(m.group(2))}/{int(m.group(3))}"
-    v = _pick_money("True Market Mean", text)
+    v = _pick_money("真實市場均價", text) or _pick_money("True Market Mean", text)
     if v is None:
         m = re.search(r"True Market Mean[（(]([\d,]+)", text)
         v = float(m.group(1).replace(",", "")) if m else None
     if v:
         out["tmm"] = v
-    for key, lab in (("sth", "STH 成本"), ("bb_over", "超賣線"), ("bb_cool", "冷卻線"), ("lth", "LTH 成本")):
-        v = _pick_money(lab, text)
-        if v:
-            out[key] = v
-    m = re.search(r"LTH SOPR[｜|]([\d.]+)", text)
+    for key, labs in (("sth", ("短期持有者成本", "STH 成本")), ("bb_over", ("超賣線",)), ("bb_cool", ("冷卻線",)),
+                      ("lth", ("長期持有者成本", "LTH 成本")), ("realized", ("已實現價格",))):
+        for lab in labs:
+            v = _pick_money(lab, text)
+            if v:
+                out[key] = v
+                break
+    m = re.search(r"LTH SOPR(?:\s*30\s*日均值\s*|[｜|])([\d.]+)", text)
     if m:
         out["lth_sopr"] = float(m.group(1))
-    # 「這輪 8/19 已經做到」站回短期成本並守住
-    if re.search(r"這輪\s*8/19\s*已經做到|8/19\s*已經做到", text):
-        out["stood_sth_month"] = 8
+    # 站回短期持有者成本並守住 30 天：日期從鏈上文字讀，不寫死
+    m = re.search(r"這輪\s*(\d{1,2})/(\d{1,2})\s*(?:已經)?做到", text)
+    if m:
+        out["stood_sth_month"] = int(m.group(1))
         out["stood_sth"] = True
-    m = re.search(r"資料日\s*(\d{1,2})/(\d{1,2})", text)
+    m = re.search(r"資料日[：:\s]*(\d{1,2})/(\d{1,2})", text)
     if m:
         out["data_md"] = f"{int(m.group(1))}/{int(m.group(2))}"
     return out
@@ -371,6 +375,20 @@ def load_onchain() -> dict:
     out: dict[str, Any] = {"source": None, "asof": None}
     text_p = ROOT / "onchain" / "onchain_text.txt"
     csv_p = ROOT / "onchain" / "combined_daily.csv"
+    state_p = ROOT / "onchain" / "onchain_state.json"
+    # 2026-11-17 起鏈上報告改用自有網站資料：優先讀它寫出的狀態檔（網站值），舊版逐日 CSV 不再使用
+    if state_p.is_file():
+        try:
+            js = json.loads(state_p.read_text())
+            for k in ("cycle", "ath", "ath_date", "sth", "tmm", "realized", "lth", "bb_over", "bb_cool", "lth_sopr",
+                      "stood_sth", "stood_sth_month", "stood_sth_date", "data_md", "cycle_low", "cycle_low_date"):
+                if js.get(k) is not None:
+                    out[k] = js[k]
+            out["source"] = str(state_p)
+            out["asof"] = js.get("data_date")
+            return out
+        except Exception as e:
+            print(f"WARN onchain_state.json: {e}", file=sys.stderr)
     if text_p.is_file():
         out.update(_parse_onchain_text(text_p.read_text()))
         out["source"] = str(text_p)
@@ -654,12 +672,12 @@ def kline_state(market: dict, onchain: dict, short: dict) -> dict:
             st["chart_low"] = lo["low"]
             st["chart_low_date"] = datetime.fromtimestamp(lo["open_time"] / 1000, TZ)
         else:
-            st["chart_low"] = short.get("stop") or 57800.0
+            st["chart_low"] = onchain.get("cycle_low") or short.get("stop")
             st["chart_low_date"] = None
     else:
         st["ath"] = onchain.get("ath")
         st["ath_date"] = onchain.get("ath_date")
-        st["chart_low"] = short.get("stop") or 57800.0
+        st["chart_low"] = onchain.get("cycle_low") or short.get("stop")
         st["chart_low_date"] = None
 
     st["sth"] = onchain.get("sth")
@@ -670,7 +688,7 @@ def kline_state(market: dict, onchain: dict, short: dict) -> dict:
     st["lth_sopr"] = onchain.get("lth_sopr")
     st["cycle"] = onchain.get("cycle") or "跌破短期成本後的弱勢"
     st["stood_sth"] = bool(onchain.get("stood_sth"))
-    st["stood_sth_month"] = onchain.get("stood_sth_month") or 8
+    st["stood_sth_month"] = onchain.get("stood_sth_month")
 
     # 交會帶：週線 MA50、日線 MA120、STH、TMM
     band = [v for v in (st["ma50_w"], st["ma120_d"], st["sth"], st["tmm"]) if v]
@@ -890,9 +908,9 @@ def long_text(st: dict, macro: dict) -> str:
     midb.append(f"鏈上仍是{cycle}。")
     if st.get("chart_low"):
         midb.append(f"圖上這輪低點在 {n0(st['chart_low'])}，回撤比過去淺，還不能當成週期大底。")
-    if st.get("stood_sth") and st.get("below_sth"):
+    if st.get("stood_sth") and st.get("stood_sth_month") and st.get("below_sth"):
         midb.append(f"{st['stood_sth_month']} 月曾站回並守住，現在又跌回去，也還沒站穩市場均價。")
-    elif st.get("stood_sth") and not st.get("below_tmm"):
+    elif st.get("stood_sth") and st.get("stood_sth_month") and not st.get("below_tmm"):
         midb.append(f"{st['stood_sth_month']} 月曾站回並守住，現在還在市場均價附近。")
     elif st.get("below_tmm"):
         midb.append("現在還沒站穩市場均價。")

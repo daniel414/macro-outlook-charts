@@ -4,7 +4,7 @@ name: fallback-onchain
 on:
   schedule:
     - cron: "40 0 * * *"          # 08:40 UTC+8
-    - cron: "40 4 * * *"          # 12:40 UTC+8 (second chance if the 08:40 run was skipped/delayed or CheckOnChain was down)
+    - cron: "40 4 * * *"          # 12:40 UTC+8 (second chance if the 08:40 run was skipped/delayed or the site data was down)
   workflow_dispatch:
     inputs:
       mode:
@@ -55,4 +55,6 @@ jobs:
           path: |
             scripts/onchain/onchain_text.txt
             scripts/onchain/onchain_summary.png
+            scripts/onchain/onchain_state.json
+            scripts/out/onchain_alert_state.json
           retention-days: 3
