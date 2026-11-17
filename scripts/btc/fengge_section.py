@@ -358,7 +358,7 @@ def forecast(price=None):
     try: bt = big_trend(r, w, d)
     except Exception as e: print("big trend skipped:", e, file=sys.stderr)
     # ---- 短線
-    L += ["", "──────────", "【短線】數小時到數天"]
+    L += ["", "──────────", "【短線】"]
     try:
         sb = short_bias(r, d, h4)
         L.append(f"・傾向：{sb['bias']}｜下一目標 {'、'.join(n0(x) for x in sb['targets'])}")
@@ -369,7 +369,7 @@ def forecast(price=None):
     L += short_lines(r)
     L += views_block("short", kl)
     # ---- 中期
-    L += ["", "──────────", "【中期】數週：掃單與流動性價位"]
+    L += ["", "──────────", "【中期】掃單與流動性價位"]
     DH, DL = pivots(d, 3)
     rs = (_rd("out/range_state.json") or {}).get("active") or {}
     dn = [(p, "前低") for _, p in DL[-8:]] + [(r["ma50w"], "50 週均線"), (lv["tmm"], "鏈上市場均價"), (lv["sth"], "短期持有者成本"), (lv["cool"], "鏈上冷卻線")]
@@ -391,11 +391,11 @@ def forecast(price=None):
         L.append(f"・上方掃單 {zs(z)}（{'、'.join(dict.fromkeys(z['names']))}）：插針站上後收回，視為掃空單後回落；日線站穩則看 {zs(nxt) if nxt else '更高壓力'}")
     if zd and zu:
         dirn = "先向下掃流動性再回升" if r["price"] < (rs.get("lo") or 0) else "區間內來回掃單"
-        L.insert(L.index("【中期】數週：掃單與流動性價位") + 1, f"・方向：{dirn}｜目標 {'、'.join(zs(z) for z in zd[:2])}｜失效：日線站回 {zs(zu[0])}，改看 {zs(zu[1]) if len(zu) > 1 else '上方前高'}")
+        L.insert(L.index("【中期】掃單與流動性價位") + 1, f"・方向：{dirn}｜目標 {'、'.join(zs(z) for z in zd[:2])}｜失效：日線站回 {zs(zu[0])}，改看 {zs(zu[1]) if len(zu) > 1 else '上方前高'}")
     L.append("・清算密集區：無可靠免費資料，未列入")
     L += views_block("mid", kl)
     # ---- 長期
-    L += ["", "──────────", "【長期】週期"]
+    L += ["", "──────────", "【長期】"]
     if bt:
         L.append(f"・大趨勢：{bt['dirn']}（評分 {bt['score']:+d}／{bt['n']} 項）")
         L.append("・依據：" + "、".join(t for _, _, t in bt["items"]))
@@ -486,7 +486,7 @@ def forecast_compact(price=None):
     # 短線
     sb = short_bias(r, d, h4)
     slv = levels_dict(px)  # short-term levels; single source for 摘要/數據
-    L += ["", "【短線】數天"]
+    L += ["", "【短線】"]
     L.append(f"方向：{sb['bias']}｜目標 {'、'.join(n0(x) for x in sb['targets'])}｜失效：{slv['forecast_invalid']}")
     s1 = [f"模型{sb['bias']}"]
     if _fav("short"): s1.append("鋒哥：" + _fav("short"))
@@ -500,7 +500,7 @@ def forecast_compact(price=None):
     up = [(p, "") for _, p in DH[-8:]] + [(lv["hot"], "")] + [(k * 1000.0, "") for k in range(int(px // 5000) * 5 + 5, int(px // 5000) * 5 + 16, 5)]
     zd = [z for z in zones(dn, px, True) if z["ref"] > px * 0.8][:3]
     zu = [z for z in zones(up, px, False) if z["ref"] < px * 1.2][:2]
-    L += ["", "【中期】數週"]
+    L += ["", "【中期】"]
     L.append(f"方向：先掃下方流動性再回升｜目標 {'、'.join(zs(z) for z in zd)}｜失效：日線收在 {zs(zd[-1]) if zd else '75K'} 下方")
     flo = [x for x in (lv["sth"], lv["tmm"], r["ma50w"]) if x]
     s2 = []
@@ -510,7 +510,7 @@ def forecast_compact(price=None):
     L.append("；".join(s2) + "。")
     # 長期
     LT = LONG_VIEW
-    L += ["", "【長期】週期"]
+    L += ["", "【長期】"]
     L.append(f"方向：偏多，熊市低點大概率已出現（{n0(lv['cyc_low']) if lv.get('cyc_low') else n0(LT['low'])}）｜目標 前高 {n0(LT['ath'])}，再上 {LT['top'].split('（')[0]}｜失效：跌回 70K 以下，再破 60K 反轉失敗")
     s3 = []
     if lv.get("cycle"): s3.append(f"鏈上週期為{lv['cycle']}")

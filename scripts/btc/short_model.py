@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import math
 import statistics
 import sys
@@ -1006,7 +1007,7 @@ def macd_sentence(macd_d: dict, macd_4: dict | None = None) -> str:
 
 
 def bias_line(check: dict, rng: dict, ma_d: dict) -> tuple[str, str, str]:
-    """回傳 (方向, 目標, 失效) 供「短線：方向｜目標｜失效」。"""
+    """回傳 (方向, 目標句, 失效) 供「短線：方向｜目標句｜失效」；目標句本身不再加「目標」二字。"""
     pos = check["position"]
     if check["stand_firm"]["ok"]:
         return ("偏多", f"站穩 {fmt_px(rng['stand_firm_zone'][0])}–{fmt_px(rng['stand_firm_zone'][1])} 後看最近壓力",
@@ -1029,7 +1030,7 @@ def render_btc_short(now: datetime, market: dict, rng: dict, check: dict, ma_d: 
     price = market["price"]
     direction, target, invalid = bias_line(check, rng, ma_d)
     lines = []
-    lines.append(f"短線：{direction}｜目標 {target}｜失效：{invalid}")
+    lines.append(f"短線：{direction}｜{target}｜失效：{invalid}")
     pos_zh = {
         "mid": "主區間中段，不開新單",
         "lower_zone": "下沿分批區，可分批現貨或小倉多",
@@ -1072,6 +1073,9 @@ def render_report(now: datetime, market: dict, rng: dict, check: dict, ma_d: dic
     supports = "、".join(fmt_px(x) for x in rng["lower_supports"])
     lines = []
     lines.append(f"現價｜{fmt_px(price)} 美元，{fmt_time_text(now)}")
+    bank = load_btc_bank_target()
+    if bank:
+        lines.append(f"投行目標｜{bank}")
     lines.append(
         f"關鍵價位｜主區間 {fmt_px(rng['low'])}–{fmt_px(rng['high'])}；"
         f"下方 {supports}；最終停損 {fmt_px(rng['final_stop'])}；"
@@ -1102,6 +1106,113 @@ def render_report(now: datetime, market: dict, rng: dict, check: dict, ma_d: dic
         obs += f"結構脫離原因：{check['reason_text']}。"
     lines.append(obs)
     return "\n".join(lines) + "\n"
+
+
+
+BANK_TARGET_FILE = Path("/workspace/big-players/bank-targets/briefing_lines.txt")
+
+
+def load_btc_bank_target(path: Path | None = None) -> str | None:
+    """只取加權目標與區間，不含命中率、偏差、樣本數或原始加權。"""
+    path = path or BANK_TARGET_FILE
+    try:
+        text = path.read_text()
+    except OSError:
+        return None
+    for ln in text.splitlines():
+        s = ln.strip()
+        if not s.startswith("BTC"):
+            continue
+        # BTC<tab or spaces>投行目標｜加權 93,242（區間 69,107–117,376；…）
+        m = re.search(
+            r"投行目標｜\s*(加權\s*[0-9,]+（區間\s*[0-9,]+[–-][0-9,]+)",
+            s,
+        )
+        if m:
+            return m.group(1).rstrip("；;）)") + "）"
+        m = re.search(r"投行目標｜\s*(.+)$", s)
+        if m:
+            return m.group(1).strip()
+    return None
+
+
+def ma120_slim_line(ma_d: dict) -> str:
+    if not ma_d or not ma_d.get("ok"):
+        return ""
+    sma = fmt_px(ma_d["sma"])
+    if ma_d.get("price_below") and not ma_d.get("heavy_long_ok"):
+        body = "價格在下方且均線未走平，只准現貨或小倉反彈單"
+    elif ma_d.get("price_below"):
+        body = "價格在下方，只准現貨或小倉反彈單"
+    elif ma_d.get("heavy_long_ok"):
+        body = "收盤在上方且均線走平，可考慮重倉合約多"
+    else:
+        body = "收盤在上方，但仍要看是否走平後突破"
+    return f"日線 MA120 在 {sma}，{body}"
+
+
+def macd_slim_line(macd_d: dict) -> str:
+    """精簡版只寫日線 MACD，控制在約 320 字。"""
+    if not macd_d or not macd_d.get("ok"):
+        return ""
+    deep = macd_d.get("deep")
+    line = macd_d.get("line") or 0
+    d_gold = (macd_d.get("last_cross") or {}).get("type") == "金叉"
+    if deep:
+        head = "日線 MACD 在零軸下方很深"
+    elif line < 0:
+        head = "日線 MACD 在零軸下方"
+    else:
+        head = "日線 MACD 在零軸上方"
+    if line < 0 and not d_gold:
+        return f"{head}，尚未金叉，只算自然反彈"
+    if line < 0 and d_gold:
+        return f"{head}且已金叉，只算自然反彈，不能當反轉確認"
+    if d_gold:
+        return f"{head}，已金叉"
+    return head
+
+
+def render_report_slim(now: datetime, market: dict, rng: dict, check: dict, ma_d: dict, macd_d: dict) -> str:
+    price = market["price"]
+    supports = "、".join(fmt_px(x) for x in rng["lower_supports"])
+    pos_zh = {
+        "mid": "現價在主區間中段，不開新單",
+        "lower_zone": "現價已靠近下沿，可分批現貨或小倉多",
+        "upper_zone": "現價靠近上沿，減倉或賣",
+        "below": "收盤已脫離主區間下沿",
+        "above": "收盤已脫離主區間上沿",
+    }[check["position"]]
+    direction = (
+        f"{pos_zh}；靠近下沿才分批現貨或小倉多，"
+        f"要突破並站穩 {fmt_px(rng['stand_firm_zone'][0])}–{fmt_px(rng['stand_firm_zone'][1])} 才確認轉強"
+    )
+    bank = load_btc_bank_target() or ""
+    lines = ["【/report 精簡版】"]
+    lines.append(f"現價｜{fmt_px(price)} 美元，{fmt_time_text(now)}")
+    if bank:
+        lines.append(f"投行目標｜{bank}")
+    else:
+        lines.append("投行目標｜")
+    lines.append(
+        f"關鍵價位｜主區間 {fmt_px(rng['low'])}–{fmt_px(rng['high'])}；"
+        f"分批 {supports}；停損 {fmt_px(rng['final_stop'])}"
+    )
+    lines.append(f"短線方向｜{direction}")
+    bullets = []
+    ma_l = ma120_slim_line(ma_d)
+    if ma_l:
+        bullets.append("・" + ma_l)
+    macd_l = macd_slim_line(macd_d)
+    if macd_l:
+        bullets.append("・" + macd_l)
+    if bullets:
+        lines.append("")
+        lines.extend(bullets[:2])
+    text = "\n".join(lines)
+    if not text.endswith("\n"):
+        text += "\n"
+    return text
 
 
 # ---------------------------------------------------------------------------
@@ -1160,11 +1271,13 @@ def run(out_dir: Path, force_recompute: bool = False, seed: bool = False, market
     }
     btc_txt = render_btc_short(now, market, rng, check, ma_d, ma_w, macd_d, macd_4, state["scenarios"])
     report_txt = render_report(now, market, rng, check, ma_d, macd_d, macd_4)
+    slim_txt = render_report_slim(now, market, rng, check, ma_d, macd_d)
 
     (out_dir / "short_model.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
     (out_dir / "btc_short.txt").write_text(btc_txt)
     (out_dir / "report_btc.txt").write_text(report_txt)
-    forecast_short = "【短線】數天\n" + btc_txt
+    (out_dir / "report_slim.txt").write_text(slim_txt)
+    forecast_short = "【短線】\n" + btc_txt
     if not forecast_short.endswith("\n"):
         forecast_short += "\n"
     (out_dir / "forecast_short.txt").write_text(forecast_short)
@@ -1172,7 +1285,7 @@ def run(out_dir: Path, force_recompute: bool = False, seed: bool = False, market
     supports = "、".join(fmt_px(x) for x in rng["lower_supports"])
     levels = {
         "bias": direction,
-        "watch": f"短線{direction}；目標 {target}。失效：{invalid}。",
+        "watch": f"短線{direction}；{target}。失效：{invalid}。",
         "support_pressure": f"支撐 {supports}｜壓力 {fmt_px(rng['stand_firm_zone'][0])}、{fmt_px(rng['stand_firm_zone'][1])}",
         "forecast_invalid": invalid,
         "targets": rng.get("lower_supports"),
@@ -1219,7 +1332,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     print(status)
     print(chk["reason_text"])
-    print(f"已寫入 {args.out}/short_model.json、btc_short.txt、report_btc.txt")
+    print(f"已寫入 {args.out}/short_model.json、btc_short.txt、report_btc.txt、report_slim.txt")
     return 0
 
 

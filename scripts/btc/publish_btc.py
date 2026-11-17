@@ -446,7 +446,7 @@ def align_forecast(fc, lv):
     """Force forecast 【短線】失效 line to lv['forecast_invalid'] (same short_bias as 摘要/數據)."""
     if not fc or not lv or not lv.get("forecast_invalid"): return fc
     return re.sub(
-        r"(【短線】數天\n方向：偏[多空]｜目標 [^｜\n]+｜失效：)[^\n]+",
+        r"(【短線】(?:數天)?\n方向：偏[多空]｜目標 [^｜\n]+｜失效：)[^\n]+",
         lambda m: m.group(1) + lv["forecast_invalid"],
         fc, count=1)
 SUMMARY_SEND = os.path.join(HERE, "out/publish/summary_send.txt")
@@ -478,7 +478,7 @@ def build_forecast(text):
         if os.path.isfile(sp):
             short = open(sp).read().strip()
         if short and short.startswith("【短線】"):
-            fc, n = re.subn(r"【短線】數天\n.*?(?=\n【中期】)", short.rstrip() + "\n", fc, count=1, flags=re.S)
+            fc, n = re.subn(r"【短線】(?:數天)?\n.*?(?=\n【中期】)", short.rstrip() + "\n", fc, count=1, flags=re.S)
             if not n:
                 print("short_model splice: 找不到【短線】段", file=sys.stderr)
         else:
@@ -628,7 +628,7 @@ def main():
     fc = build_forecast(text)
     if fc: fc = align_forecast(fc, lv)
     # 短線改版後不在預測文加「現價來源」，避免出現來源名字
-    if fc and "【短線】數天\n短線：" not in fc:
+    if fc and "【短線】\n短線：" not in fc and "【短線】數天\n短線：" not in fc:
         fc = add_src(fc)
     if fc: text = strip_model(text)
     lead = align_levels(lead_text(), lv)
