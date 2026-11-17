@@ -21,8 +21,8 @@ HODL_LAB = {"6m-9m": "6–9 個月", "9m-1y": "9–12 個月", "1y-18m": "1–1.
 RISK_Z = [(0.2, "#1E3A8A", "低風險"), (0.4, "#0891B2", "偏低"), (0.6, "#16A34A", "中性"), (0.8, "#EA580C", "偏高"), (1.01, "#DC2626", "高風險")]
 AV_Z = [("AVm2", "#2dd4bf", "極度便宜"), ("AVm15", "#26a69a", "很便宜"), ("AVm1", "#3b82f6", "便宜"), ("AVp1", "#94a3b8", "中性"),
         ("AVp15", "#f5a623", "偏貴"), ("AVp2", "#f472b6", "很貴"), (None, "#e57373", "過熱")]
-# /btckol 外框（kol_chart.py）：PAD_X=700、PAD_Y=500、內容寬 2160（總寬 3560）。大圖與預覽圖依此比例加四周留白，內容本身不變。
-KOL_PAD_X, KOL_PAD_Y, KOL_CONTENT_W = 700, 500, 2160
+# 外框：上下維持 /btckol 同比例的 741px（內容寬 3200 * 500/2160）；左右固定 135px，避免接近正方形的圖在手機上被左右留白擠小。內容本身不變。
+ONCHAIN_PAD_X, ONCHAIN_PAD_Y = 135, 741
 
 def load_hodl():
     d = None
@@ -214,8 +214,7 @@ def charts(D, A, H, outdir, now, price):
     op = os.path.join(outdir, "00_overview.png"); f.savefig(op); plt.close(f)
     from PIL import Image
     im = Image.open(op).convert("RGB")
-    padx = int(round(im.width * KOL_PAD_X / KOL_CONTENT_W))
-    pady = int(round(im.width * KOL_PAD_Y / KOL_CONTENT_W))
+    padx, pady = ONCHAIN_PAD_X, ONCHAIN_PAD_Y
     canvas = Image.new("RGB", (im.width + 2 * padx, im.height + 2 * pady), BG)
     canvas.paste(im, (padx, pady))
     canvas.save(op)
