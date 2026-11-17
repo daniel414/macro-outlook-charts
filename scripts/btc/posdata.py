@@ -245,8 +245,26 @@ def main():
     import datetime as dt
     jobs = {"okx": lambda: okx(con, a.backfill), "gate": lambda: gate(con, a.backfill), "bitget": lambda: bitget(con), "deribit": lambda: deribit(con), "kraken": lambda: kraken_daily(con), "binance_www": lambda: binance_www(con, a.backfill), "binance": lambda: binance(con),
             "bitfinex": lambda: bitfinex(con, int(dt.datetime.fromisoformat(a.bfx_since).replace(tzinfo=dt.timezone.utc).timestamp() * 1000) if a.backfill else None)}
+    # Bitfinex fetch off by default (Daniel／Manager 2026-11-17). File kept.
+    # Re-enable: POSDATA_BITFINEX=1, or --only bitfinex for a one-off / backfill.
+    def _bfx_on():
+        if a.only and "bitfinex" in a.only.split(","):
+            return True
+        env = os.environ.get("POSDATA_BITFINEX", "").strip().lower()
+        if env in ("1", "true", "yes", "on"):
+            return True
+        cfg = os.path.join(os.path.dirname(os.path.abspath(__file__)), "btc_summary.json")
+        try:
+            if os.path.isfile(cfg) and json.load(open(cfg, encoding="utf-8")).get("collect_bitfinex") is True:
+                return True
+        except Exception:
+            pass
+        return False
     for k, f in jobs.items():
         if a.only and k not in a.only.split(","):
+            continue
+        if k == "bitfinex" and not _bfx_on():
+            print(f"[{time.strftime('%F %T')}] posdata bitfinex: skipped (collect_bitfinex off)", flush=True)
             continue
         try:
             print(f"[{time.strftime('%F %T')}] posdata {k}: {f()} rows", flush=True)

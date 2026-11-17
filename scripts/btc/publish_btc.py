@@ -81,7 +81,7 @@ LEAD_FILE = os.path.join(HERE, "out/lead_text.txt")
 PRICE = {}   # set by apply_chainlink(): old/new price strings, source label, check details
 def apply_chainlink(text, ref=None):
     """Current price = Chainlink BTC/USD (Daniel 2026-10-27). Sanity: diff vs existing source < 0.5%, updatedAt <= 2h,
-    else keep the existing (exchange kline) price. Header line 2 gets 「｜現價來源：…」; old price string replaced in text."""
+    else keep the existing (exchange kline) price. Source label stays in log/json only, not in user-facing text."""
     L = text.splitlines()
     m = re.search(r"｜BTC ([\d,]+(?:\.\d+)?)", L[1]) if len(L) > 1 else None
     if not m: return text
@@ -98,13 +98,16 @@ def apply_chainlink(text, ref=None):
     else:
         PRICE.update(source="交易所 K 線（Chainlink 未通過檢查）")
     print("PRICE_SOURCE", json.dumps({k: v for k, v in PRICE.items()}, ensure_ascii=False), file=sys.stderr)
-    return add_src(text)
+    return strip_price_source(text)
+def strip_price_source(t):
+    """Remove user-facing price-source labels. Internal PRICE check is unchanged."""
+    t = re.sub(r"｜現價來源：[^\n｜]*", "", t)
+    t = re.sub(r"現價來源：[^\n｜]*", "", t)
+    t = re.sub(r"｜[ \t]*$", "", t, flags=re.M)
+    return t
 def add_src(t):
-    """Append 「｜現價來源：X」 to line 2 (idempotent)."""
-    if not PRICE.get("source"): return t
-    L = t.splitlines()
-    if len(L) > 1 and "現價來源" not in L[1]: L[1] += "｜現價來源：" + PRICE["source"]
-    return "\n".join(L)
+    """Deprecated as an append: user-facing text must not show 現價來源. Still strips leftovers."""
+    return strip_price_source(t)
 def lead_text():
     try:
         if time.time() - os.path.getmtime(LEAD_FILE) > 3 * 3600: return ""  # stale: skip
@@ -224,25 +227,49 @@ def kol_text():
     except Exception as e: print("cq kol skipped:", e, file=sys.stderr)
     L += ["", "僅整理公開觀點，非投資建議"]
     return EMOJI.sub("", "\n".join(L))[:4900]
+def summary_opts():
+    """Persistent switches for /btc 持倉摘要. Defaults follow the 11/17 cuts; file can flip a flag back."""
+    d = {"omit_retail": True, "omit_bitfinex": True, "omit_consensus": True,
+         "omit_binance_block": True, "omit_structure": True, "omit_price_source_text": True}
+    path = os.path.join(HERE, "btc_summary.json")
+    try:
+        if os.path.isfile(path):
+            raw = json.loads(open(path, encoding="utf-8").read())
+            if isinstance(raw, dict):
+                d.update({k: bool(raw[k]) for k in d if k in raw})
+    except Exception as e:
+        print("summary_opts:", e, file=sys.stderr)
+    return d
+
+def _drop_section(text, title_pat):
+    return re.sub(r"\n*" + re.escape(DIV) + r"\n" + title_pat + r".*?(?=\n\n" + re.escape(DIV) + r"\n|\Z)", "", text, flags=re.S).rstrip()
+
+def report_when_line(when, px):
+    """2026.11.17 台北時間 07:31｜BTC 65,197 — no (UTC+8)."""
+    return f"{when.strftime('%Y.%m.%d')} 台北時間 {when.strftime('%H:%M')}｜{px}"
+
+def sync_forecast_header(fc, text):
+    """Copy the summary time/price line onto the forecast header."""
+    if not fc or not text: return fc
+    Lsum, Lfc = text.splitlines(), fc.splitlines()
+    if len(Lsum) > 1 and len(Lfc) > 1:
+        Lfc[1] = Lsum[1]
+        return "\n".join(Lfc)
+    return fc
+
 def summary(j, when):
     g = j.get
     px = f"BTC {g('btc'):,.0f}" if g("btc") else "BTC -"
     def sec(*lines): return ["", DIV, *lines]
-    L = ["BTC 持倉數據", f"{when.strftime('%Y.%m.%d %H:%M')} (UTC+8)｜{px}"]
+    L = ["BTC 持倉數據", report_when_line(when, px)]
     # Lead sections, in order: 1 分析師觀點, 2 持倉變化; then the positioning sections.
     for lead in (change_section,):   # analyst views moved to /analyst (btc/kol_latest.json)
         L += lead(sec)
-    # 【散戶 vs 大戶】 skeleton (add_rvw fills exchange bullets; agent --text supplies prose when available)
-    L += sec("【散戶 vs 大戶】",
-             "散戶：",
-             "・全體帳戶：",
-             "",
-             "大戶：",
+    # 【大戶】 skeleton (add_rvw fills 大戶持倉／大戶帳戶). 散戶／全體帳戶／巨鯨散戶差已關。
+    L += sec("【大戶】",
              "・大戶持倉：",
              "・大戶帳戶：",
-             "・巨鯨散戶差：",
-             "",
-             "解讀：短線仍偏多。")
+             "・定義：Binance 保證金前 20%；OKX 持倉前 5%；Gate/Bitget 未公開。")
     def oi(name, k):
         c = g(k.replace("_usd", "_24h_pct"))
         return f"{name} {busd(g(k))}" + (f" ({pct(c)} 24h)" if c is not None else "")
@@ -252,12 +279,14 @@ def summary(j, when):
     L += sec("【未平倉量】", "・" + "｜".join(oi_parts))
     L += sec("【資金費率】",
              f"・每 8h：OKX {pct(g('資金費率_okx_8h_pct'),4)}｜Gate {pct(g('資金費率_gate_pct'),4)}")
-    L += sec("【Bitfinex 槓桿】",
-             f"・{pct(g('多空差值_bitfinex_pct'),2)}｜多 {g('bitfinex_多_btc') or 0:,.0f}／空 {g('bitfinex_空_btc') or 0:,.0f} BTC")
+    opt = summary_opts()
+    if not opt.get("omit_bitfinex"):
+        L += sec("【Bitfinex 槓桿】",
+                 f"・{pct(g('多空差值_bitfinex_pct'),2)}｜多 {g('bitfinex_多_btc') or 0:,.0f}／空 {g('bitfinex_空_btc') or 0:,.0f} BTC")
     ah = g('ahr999')
     zone = "" if ah is None else ("｜抄底區（<0.45）" if ah < 0.45 else "｜定投區（0.45–1.2）" if ah <= 1.2 else "｜高於定投線（>1.2）")
     L += sec("【Ahr999】", f"・{f1(ah,2,False)}{zone}")
-    if g("binance_多空差值_大戶持倉") is not None:
+    if g("binance_多空差值_大戶持倉") is not None and not summary_opts().get("omit_binance_block"):
         L += sec("【Binance】",
                  f"・全部 {pct(g('binance_多空差值_全部'))}｜大戶持倉 {pct(g('binance_多空差值_大戶持倉'))}",
                  f"・巨鯨vs散戶 {f1(g('binance_巨鯨散戶差'),2)}")
@@ -310,8 +339,11 @@ def publish_kol(when, stamp, require=False):
         return None
 def add_structure(text):
     """Insert the objective structure section (btc_structure.py, run as a script) before 【Binance…】, else at the end.
+    If omit_structure, drop any existing block and do not insert.
     Title 【技術結構】 (old title 【技術結構（客觀數據，非投資建議）】 also recognised): any existing structure block is
     replaced by the fresh one, so it never appears twice. On any failure/timeout the text is returned unchanged."""
+    if summary_opts().get("omit_structure"):
+        return _drop_section(text, r"【技術結構(?:】|（客觀數據，非投資建議）】)")
     try:
         m = re.search(r"｜BTC ([\d,]+(?:\.\d+)?)", "\n".join(text.splitlines()[:3]))
         cmd = [sys.executable, os.path.join(HERE, "btc_structure.py")] + (["--price", m.group(1).replace(",", "")] if m else [])
@@ -339,6 +371,8 @@ def add_range(text):
 def add_consensus(text):
     """Insert 【分析師共識】 (cq_consensus.py --line, run as a script; CryptoQuant σ as a contrarian gauge, cache refreshed daily)
     right before 【技術結構】 (else before 【Binance…】, else at the end). Replaced if present, so it appears once. Unchanged on failure."""
+    if summary_opts().get("omit_consensus"):
+        return _drop_section(text, r"【分析師共識】")
     try:
         sec = subprocess.run([sys.executable, os.path.join(HERE, "cq_consensus.py"), "--line"], cwd=HERE, capture_output=True, text=True, timeout=90).stdout.strip()
         if not sec.startswith("【分析師共識】"): return text
@@ -393,7 +427,6 @@ def run_short_model():
     except Exception as e:
         print("short_model skipped:", e, file=sys.stderr)
         return None
-
 
 
 def _midlong_voice_config_path():
@@ -524,7 +557,6 @@ def build_forecast(text):
         if not fc.startswith("BTC 走勢預測"): return ""
         ts = re.search(r"\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}", text)
         if ts: fc = re.sub(r"\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}", ts.group(0), fc, count=1)
-
         # 走勢預測「短線」改用 short_model.py；中期、長期由 midlong_voice.json（enabled）控制，環境變數可暫時覆蓋
         short = None
         sm_out = _short_model_out()
@@ -539,7 +571,6 @@ def build_forecast(text):
                 print("short_model splice: 找不到【短線】段", file=sys.stderr)
         else:
             print("short_model forecast not used; kept previous short section", file=sys.stderr)
-
         # 中期、長期：midlong_voice.json enabled 或 MIDLONG_VOICE=1 才改用 midlong_model.py
         if midlong_voice_on():
             ml_out = run_midlong_model()
@@ -604,6 +635,8 @@ def bn_header(r=None):
     return f"【Binance（截至 {datetime.fromtimestamp(ts).strftime('%m/%d %H:%M')}）】" if ts else "【Binance】"
 def add_binance(text):
     """Rebuild the 【Binance…】 block from positioning2.db (same formulas as positioning_grid.py), so title and numbers match."""
+    if summary_opts().get("omit_binance_block"):
+        return _drop_section(text, r"【Binance[^\n]*】")
     r = bn_latest()
     if not r: return text
     d = lambda x: (x - 1) / (x + 1) * 100
@@ -629,7 +662,10 @@ def add_notes(text):
     return "\n".join(out)[:4900]
 def add_longshort(text):
     """Insert 【多空比】 (ls_section.py, run as a script) right before 【未平倉量】 (i.e. after 【散戶 vs 大戶】).
-    Any existing 【多空比】 block is replaced, so it appears once. On failure the text is returned unchanged."""
+    Any existing 【多空比】 block is replaced, so it appears once. On failure the text is returned unchanged.
+    If omit_retail, drop the section (大戶百分比已在【大戶】，不再寫一份比值)."""
+    if summary_opts().get("omit_retail"):
+        return _drop_section(text, r"【多空比】")
     try:
         sec = subprocess.run([sys.executable, os.path.join(HERE, "ls_section.py")], cwd=HERE, capture_output=True, text=True, timeout=45).stdout.strip()
         if not sec.startswith("【多空比】"): return text
@@ -647,13 +683,16 @@ def add_rvw(text):
         out = subprocess.run([sys.executable, os.path.join(HERE, "ls_section.py"), "--rvw"], cwd=HERE, capture_output=True, text=True, timeout=45).stdout.strip()
         new = {}
         for ln in out.splitlines():
-            for k in ("・全體帳戶：", "・大戶持倉：", "・大戶帳戶：", "・巨鯨散戶差："):
+            keys = ("・大戶持倉：", "・大戶帳戶：") if summary_opts().get("omit_retail") else ("・全體帳戶：", "・大戶持倉：", "・大戶帳戶：", "・巨鯨散戶差：")
+            for k in keys:
                 if ln.startswith(k): new[k] = ln
         if not new: return text
         L = text.splitlines(); inblk = False; res = []
         for ln in L:
-            if ln.startswith("【"): inblk = ln.startswith("【散戶 vs 大戶】")
+            if ln.startswith("【"): inblk = ln.startswith("【散戶 vs 大戶】") or ln.startswith("【大戶】")
             if inblk and ln.startswith(RVW_KEYS):
+                if summary_opts().get("omit_retail") and ln.startswith(("・全體帳戶：", "・OKX 全體", "・全體：", "・巨鯨散戶差")):
+                    continue
                 k = "・全體帳戶：" if ln.startswith(("・全體帳戶：", "・OKX 全體", "・全體：")) else "・巨鯨散戶差：" if ln.startswith("・巨鯨散戶差") else ln[:6]
                 if k in new:
                     m = re.search(r"（[^）]*）\s*$", ln) if k == "・巨鯨散戶差：" else None
@@ -688,7 +727,7 @@ def main():
     if a.text: text = open(a.text).read().strip()[:4900]
     elif j: text = summary(j, when)
     else: sys.exit("need --text or --json (or run without args)")
-    text = apply_chainlink(text, j.get("btc") if j else None)
+    text = strip_price_source(apply_chainlink(text, j.get("btc") if j else None))
     text = add_notes(strip_hl(add_binance(add_fengge(add_consensus(add_longshort(add_rvw(add_range(add_structure(text)))))))))
     # Single source of short-term levels (short_bias) for 摘要 / 完整數據 解讀 / 走勢預測
     _pm = re.search(r"｜BTC ([\d,]+(?:\.\d+)?)", "\n".join(text.splitlines()[:3]))
@@ -698,8 +737,8 @@ def main():
     fc = build_forecast(text)
     if fc: fc = align_forecast(fc, lv)
     # 短線改版後不在預測文加「現價來源」，避免出現來源名字
-    if fc and "【短線】\n短線：" not in fc and "【短線】數天\n短線：" not in fc and "【短線】\n現價" not in fc:
-        fc = add_src(fc)
+    if fc:
+        fc = strip_price_source(sync_forecast_header(fc, text))
     if fc: text = strip_model(text)
     lead = align_levels(lead_text(), lv)
     stamp = when.strftime("%Y%m%d_%H%M")

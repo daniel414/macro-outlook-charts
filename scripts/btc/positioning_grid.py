@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""BTC positioning overview (2×2 mobile-readable): leverage stack | whale vs retail | Bitfinex | Ahr999.
+"""BTC positioning overview (2×1 mobile-readable): leverage stack | Ahr999. Whale-vs-retail and Bitfinex panels removed 2026-11-17.
 Leverage stack (CoinGlass order): OKX perp OHLC → aggregate OI candles → futures CVD (OKX+Bitget raw taker)
 / spot CVD (BN+OKX) → OI-weighted funding. No Binance fapi. Prints POSGRID_JSON + png path.
 """
@@ -398,11 +398,11 @@ def main():
     plt.rcParams.update({"font.family": ["Noto Sans CJK TC", "DejaVu Sans"], "font.size": 10.5,
                          "text.color": TH["text"], "xtick.color": TH["muted"], "ytick.color": TH["muted"]})
     fs = a.font_scale
-    # 2×2 — 槓桿堆疊 / 巨鯨vs散戶 / Bitfinex / Ahr999（移除全部帳戶、OKX大戶、BN/Gate大戶、獨立費率格）
-    fig = plt.figure(figsize=(30 / fs, 42 / fs), dpi=a.dpi * fs, facecolor=TH["bg"])
-    gs = fig.add_gridspec(2, 2, left=0.045, right=0.955, top=0.88, bottom=0.05, hspace=0.32, wspace=0.12,
+    # 2×1 — 槓桿堆疊 / Ahr999（巨鯨 vs 散戶、Bitfinex 面板已關）
+    fig = plt.figure(figsize=(16 / fs, 36 / fs), dpi=a.dpi * fs, facecolor=TH["bg"])
+    gs = fig.add_gridspec(2, 1, left=0.07, right=0.93, top=0.88, bottom=0.06, hspace=0.30,
                           height_ratios=[1.55, 1.0])
-    axs = [fig.add_subplot(gs[i // 2, i % 2]) for i in range(4)]
+    axs = [fig.add_subplot(gs[0, 0]), fig.add_subplot(gs[1, 0])]
     for ax in axs:
         style(ax)
     xlim = (num([start_b])[0], num([end_b])[0])
@@ -422,52 +422,10 @@ def main():
                 ha="center", va="center", color=TH["down"], fontsize=12)
         head(ax, "槓桿力道（暫不可用）", "見日誌", "降級", "—")
 
-    # 1 巨鯨 vs 散戶
+    # 巨鯨 vs 散戶、Bitfinex 面板已拿掉（不再繪製、不再讀 Bitfinex 序列）
+
+    # 1 Ahr999
     ax = axs[1]
-    try:
-        wd = (S("okx", "top_ls_position") - S("okx", "ls_account")).dropna()
-        bwd = (BS("top_position") - BS("global_account")).dropna()
-        deltabars(ax, wd, w); stepline(ax, bwd, w, BN_COL, lw=1.4); bn_mark(ax, bwd, w)
-        both = pd.concat([wd, bwd])
-        m = max(0.1, float(np.nanmax(np.abs(both.values))) * 1.15) if not both.empty else 1
-        ax.set_ylim(-m, m); ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _=None: f"{v:+.2f}" if abs(v) > 1e-9 else "0"))
-        vw, tw = last(wd); cur[f"巨鯨散戶差_okx_{a.tf}"] = vw
-        try:
-            import whale_delta_chart as WD
-            d = WD.delta_daily(); cur["巨鯨散戶差_okx_日線"] = float(d.iloc[-1]); cur["巨鯨散戶差_日期"] = str(d.index[-1].date())
-        except Exception as e:
-            fails.append(f"whale daily: {e!r}")
-        head(ax, "巨鯨 vs 散戶差值", f"OKX {vw:+.3f} · {tw}" if vw is not None else "資料不足",
-             "看法：大戶持倉比−散戶帳戶比。綠=大戶偏多；紫=Binance",
-             "來源：OKX rubik top−account（柱）、Binance top−global（紫線）")
-        legend(ax, [("OKX 差值（柱）", TH["up"]), (BN_LAB, BN_COL)]); add_price(ax, kl, w)
-        end_tag(ax, wd, "{:+.2f}", TH["up"]); end_tag(ax, bwd, "{:+.2f}", BN_COL)
-    except Exception as e:
-        fails.append(f"whale delta: {e!r}"); head(ax, "巨鯨 vs 散戶差值", "繪製失敗", "", "")
-
-    # 2 Bitfinex
-    ax = axs[2]
-    bl = series(con, "bitfinex", "long", "1H", start_b, end_b); bs = series(con, "bitfinex", "short", "1H", start_b, end_b)
-    if a.tf != "1H" and not bl.empty:
-        bl = bl.groupby(bucket_start(bl.index.to_numpy(), step)).last(); bs = bs.groupby(bucket_start(bs.index.to_numpy(), step)).last()
-    bd = ((bl - bs) / (bl + bs) * 100).dropna()
-    deltabars(ax, bd, w)
-    if not bd.empty:
-        lo_, hi_ = float(bd.min()), float(bd.max()); pad = max(0.05, (hi_ - lo_) * 0.15)
-        ax.set_ylim(lo_ - pad, hi_ + pad)
-        ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _=None: f"{v:+.2f}%"))
-    vl, vs = last(bl)[0], last(bs)[0]; vd = last(bd)[0]
-    cur["多空差值_bitfinex_pct"], cur["bitfinex_多_btc"], cur["bitfinex_空_btc"] = vd, vl, vs
-    if vd is None:
-        fails.append("bitfinex: no data")
-    head(ax, "Bitfinex 槓桿多空差值", f"{vd:+.2f}% · 多 {vl:,.0f} / 空 {vs:,.0f} BTC" if vd is not None else "資料不足",
-         "看法：近全多。看變化：下降＝空增或多減",
-         "來源：Bitfinex stats1 pos.size tBTCUSD long/short")
-    add_price(ax, kl, w)
-    end_tag(ax, bd, "{:+.2f}%", TH["up"])
-
-    # 3 Ahr999
-    ax = axs[3]
     try:
         ah = ahr999_series()
         if a.ahr_days > 0:
@@ -525,15 +483,15 @@ def main():
         fails.append(f"ls delta json: {e!r}")
 
     for i, ax in enumerate(axs):
-        if i != 3:
+        if i != 1:
             ax.set_xlim(*xlim); ax.yaxis.set_major_locator(MaxNLocator(5))
             ax.xaxis.set_major_locator(mdates.AutoDateLocator(tz=TZ, minticks=6, maxticks=12))
             ax.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d", tz=TZ))
     nowt = datetime.now(TZ)
     # 標題區完全在 gridspec top=0.88 之上，與單元 head() 分離
-    fig.text(0.04, 0.978, "BTC 持倉數據", fontsize=24, fontweight="bold", color=TH["title"], va="top")
-    fig.text(0.955, 0.978, f"{nowt:%Y/%m/%d %H:%M} UTC+8", fontsize=14, color=TH["muted"], ha="right", va="top")
-    fig.text(0.04, 0.935, f"{a.tf} · {a.bars} 根（{a.bars*step/86400:g} 天）· BTC {kl.c.iloc[-1]/1000:.1f}K · 左上＝槓桿四層（價→OI→CVD→費率）· 多空僅留巨鯨/Bitfinex · 非 fapi",
+    fig.text(0.07, 0.978, "BTC 持倉數據", fontsize=24, fontweight="bold", color=TH["title"], va="top")
+    fig.text(0.93, 0.978, f"{nowt:%Y/%m/%d} 台北時間 {nowt:%H:%M}", fontsize=14, color=TH["muted"], ha="right", va="top")
+    fig.text(0.07, 0.935, f"{a.tf} · {a.bars} 根（{a.bars*step/86400:g} 天）· BTC {kl.c.iloc[-1]/1000:.1f}K · 上＝槓桿四層（價→OI→CVD→費率）· 下＝Ahr999 · 非 fapi",
              fontsize=12, color=TH["muted"], va="top")
 
     out = a.out or str(OUT_DIR / "positioning" / f"btc_positioning_overview_{nowt:%Y%m%d_%H%M%S}.png")

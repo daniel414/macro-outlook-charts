@@ -1,0 +1,11 @@
+{
+  "omit_retail": true,
+  "omit_bitfinex": true,
+  "omit_consensus": true,
+  "omit_binance_block": true,
+  "omit_structure": true,
+  "omit_price_source_text": true,
+  "omit_jiedu": true,
+  "collect_bitfinex": false,
+  "note": "Daniel／Manager 2026-11-17：持倉摘要刪散戶／Bitfinex／分析師共識／【Binance】／【技術結構】／解讀行／現價來源字樣；posdata 預設不停抓 Bitfinex（檔案保留，POSDATA_BITFINEX=1 可手動）。此檔不含金鑰。"
+}

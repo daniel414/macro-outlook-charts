@@ -353,7 +353,7 @@ def forecast(price=None):
     lv = onchain_levels(); kl = kol_layers()
     import datetime as dt
     tw = dt.datetime.now(dt.timezone(dt.timedelta(hours=8)))
-    L = ["BTC 走勢預測", f"{tw.strftime('%Y.%m.%d %H:%M')} (UTC+8)｜BTC {n0(px)}"]
+    L = ["BTC 走勢預測", f"{tw.strftime('%Y.%m.%d')} 台北時間 {tw.strftime('%H:%M')}｜BTC {n0(px)}"]
     bt = None
     try: bt = big_trend(r, w, d)
     except Exception as e: print("big trend skipped:", e, file=sys.stderr)
@@ -482,7 +482,7 @@ def forecast_compact(price=None):
     lv = onchain_levels()
     tw = dt.datetime.now(dt.timezone(dt.timedelta(hours=8)))
     cnt, kl, div = _kol_digest()
-    L = ["BTC 走勢預測", f"{tw.strftime('%Y.%m.%d %H:%M')} (UTC+8)｜BTC {n0(px)}"]
+    L = ["BTC 走勢預測", f"{tw.strftime('%Y.%m.%d')} 台北時間 {tw.strftime('%H:%M')}｜BTC {n0(px)}"]
     # 短線
     sb = short_bias(r, d, h4)
     slv = levels_dict(px)  # short-term levels; single source for 摘要/數據

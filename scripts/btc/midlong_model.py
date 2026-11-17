@@ -2,7 +2,9 @@
 """BTC 中期／長期口語模型（每日檢查，模板組句，不用 LLM）。
 
 只當腳本執行，禁止被 import。publish_btc.py 以 subprocess 呼叫。
-開關在 publish_btc.py：環境變數 MIDLONG_VOICE（預設 0／關閉）。
+是否啟用由 midlong_voice.json 的 enabled 控制（環境變數 MIDLONG_VOICE 可暫時覆蓋）。
+寫法由同檔 style 控制：v1 為已核准的口語模板，macro 為總經框架劇本模板（環境變數 MIDLONG_STYLE 或 --style 可暫時覆蓋）。
+會議與弱勢窗口日期讀 midlong_calendar.json，不寫死在模板裡。
 
 資料：現貨 K 線（幣安 → OKX → Bitstamp），鏈上既有輸出，總經既有日報／本地檔。
 總經若缺或過舊，改寫不含數字的定性句，不編造。
@@ -685,6 +687,42 @@ def kline_state(market: dict, onchain: dict, short: dict) -> dict:
     st["below_ma200_w"] = st["ma200_w"] is not None and px < st["ma200_w"]
     st["below_tmm"] = st["tmm"] is not None and px < st["tmm"]
     st["below_sth"] = st["sth"] is not None and px < st["sth"]
+
+    def _week_vs_ma(n: int, key: str) -> tuple[bool, bool, bool]:
+        ma = st.get(key)
+        below = broke = reclaimed = False
+        if ma is not None and cw:
+            last = cw[-1]
+            below = last["close"] < ma
+            if len(cw) >= 2:
+                prev_ma = sma([r["close"] for r in cw[:-1]], n)
+                if prev_ma is not None:
+                    broke = cw[-2]["close"] >= prev_ma and last["close"] < ma
+                    reclaimed = cw[-2]["close"] < prev_ma and last["close"] >= ma
+        return below, broke, reclaimed
+
+    st["week_below_ma50"], st["week_broke_ma50"], st["week_reclaimed_ma50"] = _week_vs_ma(50, "ma50_w")
+    st["week_below_ma200"], st["week_broke_ma200"], st["week_reclaimed_ma200"] = _week_vs_ma(200, "ma200_w")
+    # 深度只做內部判斷，正文禁止寫距離或百分比
+    st["deep_below_ma200"] = bool(st.get("ma200_w") and px <= st["ma200_w"] * 0.70)
+    st["just_below_ma200"] = bool(st.get("week_below_ma200") and not st["deep_below_ma200"])
+
+    low = st.get("chart_low")
+    low_t = st.get("chart_low_date")
+    broken = False
+    if low:
+        for rows in (cd, cw, cm):
+            for r in rows:
+                t = datetime.fromtimestamp(r["open_time"] / 1000, TZ)
+                if low_t and t.date() <= (low_t.date() if hasattr(low_t, "date") else low_t):
+                    continue
+                if r["close"] < low:
+                    broken = True
+                    break
+            if broken:
+                break
+    st["cycle_low_broken"] = broken
+    st["cycle_low_intact"] = not broken
     return st
 
 
@@ -877,6 +915,301 @@ def long_text(st: dict, macro: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# 寫法開關、行事曆、macro 模板
+# ---------------------------------------------------------------------------
+FORBIDDEN_EXTERNAL = ("54,000", "54K", "54k", "40,000", "40K", "40k", "72–73", "72-73", "72,000", "73,000")
+
+
+def _voice_config_path() -> Path:
+    for p in (ROOT / "midlong_voice.json", HERE / "midlong_voice.json", ROOT / "data" / "midlong_voice.json"):
+        if p.is_file():
+            return p
+    return ROOT / "midlong_voice.json"
+
+
+def resolve_style(cli: str | None = None) -> str:
+    if cli and str(cli).strip():
+        v = str(cli).strip().lower()
+    else:
+        env = os.environ.get("MIDLONG_STYLE")
+        if env is not None and str(env).strip() != "":
+            v = str(env).strip().lower()
+        else:
+            v = "v1"
+            try:
+                d = json.loads(_voice_config_path().read_text(encoding="utf-8"))
+                v = str(d.get("style") or "v1").strip().lower()
+            except Exception:
+                v = "v1"
+    if v not in ("v1", "macro"):
+        print(f"midlong style {v!r} unknown, fallback v1", file=sys.stderr)
+        return "v1"
+    return v
+
+
+def _parse_tp(s: str) -> datetime:
+    dt = datetime.fromisoformat(s)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=TZ)
+    return dt.astimezone(TZ)
+
+
+def load_calendar(now: datetime | None = None) -> dict:
+    now = now or now_tp()
+    paths = (ROOT / "midlong_calendar.json", HERE / "midlong_calendar.json", ROOT / "data" / "midlong_calendar.json")
+    data: dict[str, Any] = {}
+    src = None
+    for p in paths:
+        if p.is_file():
+            try:
+                data = json.loads(p.read_text(encoding="utf-8"))
+                src = str(p)
+                break
+            except Exception:
+                continue
+    meetings = []
+    for m in data.get("meetings") or []:
+        raw = m.get("decision_at") or m.get("at")
+        if not raw:
+            continue
+        try:
+            meetings.append(_parse_tp(str(raw)))
+        except Exception:
+            continue
+    upcoming = [d for d in meetings if d > now]
+    next_m = min(upcoming) if upcoming else None
+    we = data.get("weak_window_end")
+    window_end = None
+    if we:
+        try:
+            if "T" in str(we):
+                window_end = _parse_tp(str(we))
+            else:
+                window_end = datetime.strptime(str(we)[:10], "%Y-%m-%d").replace(hour=23, minute=59, second=59, tzinfo=TZ)
+        except Exception:
+            window_end = None
+    window_open = bool(window_end and now <= window_end)
+    if window_end and 10 <= window_end.day <= 20:
+        window_label = f"{window_end.month} 月中"
+    elif window_end:
+        window_label = f"{window_end.month} 月 {window_end.day} 日"
+    else:
+        window_label = None
+    return {
+        "source": src,
+        "next_meeting": next_m,
+        "meeting_label": f"{next_m.month} 月 {next_m.day} 日" if next_m else None,
+        "meeting_upcoming": next_m is not None,
+        "window_end": window_end,
+        "window_open": window_open,
+        "window_label": window_label,
+    }
+
+
+def mid_macro_script(st: dict, macro: dict, cal: dict) -> str:
+    parts = []
+    if macro.get("fresh") and macro.get("dxy") and macro.get("y10") and macro.get("y2"):
+        md = macro.get("dxy_md") or (macro.get("asof") and "/".join(str(int(x)) for x in macro["asof"].split("-")[1:]))
+        high = "，再做新高" if macro.get("dxy_new_high") else ""
+        parts.append(f"美元 {md} 收到 {n2(macro['dxy'])}{high}；")
+        parts.append(f"10 年期 {n2(macro['y10'])}%、2 年期 {n2(macro['y2'])}%")
+        if macro.get("ffr_high") is not None:
+            if macro["y2"] > macro["ffr_high"]:
+                parts.append("，還高過政策利率")
+            elif macro["y2"] < (macro.get("ffr_low") or macro["ffr_high"]):
+                parts.append("，已經低於政策利率")
+            else:
+                parts.append("，和政策利率差不多")
+        if macro.get("hike_next") and cal.get("meeting_upcoming"):
+            parts.append("，市場在押這次會議再升息")
+        parts.append("，錢也沒有放鬆。")
+    else:
+        parts.append("美元和長端利率還在高檔，政策也還沒轉鬆，錢也沒有放鬆。")
+    if cal.get("window_open") and cal.get("window_label"):
+        parts.append(f"弱勢窗口還開到 {cal['window_label']}。")
+    return "".join(parts)
+
+
+def mid_text_macro(st: dict, macro: dict, cal: dict) -> str:
+    bits = []
+    if st.get("ma50_w"):
+        if st.get("week_below_ma50"):
+            bits.append(f"週線已經收在週線 MA50 的 {n0(st['ma50_w'])} 下面")
+        elif st.get("week_reclaimed_ma50"):
+            bits.append(f"週線已經收復週線 MA50 的 {n0(st['ma50_w'])}")
+        else:
+            bits.append(f"週線還收在週線 MA50 的 {n0(st['ma50_w'])} 上面")
+        if st.get("below_ma120_d"):
+            bits.append("，日線也還壓在均線下面。")
+        else:
+            bits.append("，日線已經站上 MA120。")
+    elif st.get("below_ma120_d"):
+        bits.append("日線還壓在均線下面。")
+
+    if st.get("wk_lh") and not st.get("wk_hl"):
+        bits.append("高點下移，低點也還沒墊高。")
+    elif st.get("wk_hh") and st.get("wk_hl"):
+        bits.append("高點和低點都在墊高。")
+    elif st.get("wk_lh") and st.get("wk_ll"):
+        bits.append("高點下移，低點也在走低。")
+    else:
+        bits.append("高低點還沒走出清楚的方向。")
+
+    bits.append(f"現價 {n0(st['price'])}。")
+
+    side, cross = st.get("w_macd_side"), st.get("w_macd_cross")
+    if side == "零軸上" and cross == "死叉":
+        bits.append("週線 MACD 還在零軸上就死叉。")
+    elif side == "零軸下" and cross == "金叉":
+        bits.append("週線 MACD 已在零軸下金叉。")
+    elif side == "零軸下" and cross == "死叉":
+        bits.append("週線 MACD 還在零軸下，沒有金叉。")
+    elif side == "零軸上" and cross == "金叉":
+        bits.append("週線 MACD 在零軸上金叉。")
+    else:
+        bits.append("週線 MACD 還沒走出清楚的交叉。")
+    p1 = "".join(bits)
+    p2 = mid_macro_script(st, macro, cal)
+
+    act = ["這裡不追多，也不把反彈先當成底部。"]
+    if cal.get("meeting_upcoming") and cal.get("meeting_label"):
+        act.append("一條路是這附近不再反彈，最後一跌可能很快出現；")
+        act.append(f"另一條是先反彈、很快做出更低的高點，再跌進 {cal['meeting_label']}的利率會議，會後就比較難再長期看空。")
+    else:
+        act.append("會議已經過了，之後就比較難再長期看空。")
+    if st.get("week_below_ma30"):
+        act.append("週線收盤重新站回並守住週線 MA30，這套就要重估；")
+    else:
+        act.append("週線收盤再跌回週線 MA30 下方，這套就要重估；")
+    if st.get("range_low") is not None:
+        act.append(f"若週線收盤跌破主區間下沿 {n0(st['range_low'])}，就改按更弱的路徑來看。")
+    p3 = "".join(act)
+    return p1 + "\n\n" + p2 + "\n\n" + p3
+
+
+def long_text_macro(st: dict, macro: dict, cal: dict) -> str:
+    bits = []
+    if st.get("ath") and st.get("ath_date"):
+        bits.append(f"從 {st['ath_date']} 前高 {n0(st['ath'])} 下來後，")
+    if st.get("year_open") is not None:
+        if st.get("bear_year"):
+            bits.append(f"今年絕大多數日線都收在年開盤價 {n0(st['year_open'])} 下方，這是熊市年。")
+        elif st.get("bear_year") is False:
+            bits.append(f"今年多數日線收在年開盤價 {n0(st['year_open'])} 上方。")
+        else:
+            bits.append(f"年開盤價在 {n0(st['year_open'])}。")
+    if st.get("ma200_w"):
+        if st.get("week_reclaimed_ma200") or (not st.get("week_below_ma200") and not st.get("below_ma200_w")):
+            bits.append(f"價格已重新站回週線 MA200 的 {n0(st['ma200_w'])} 上面。")
+        elif st.get("week_below_ma200") or st.get("below_ma200_w"):
+            bits.append(f"價格已經掉到週線 MA200 的 {n0(st['ma200_w'])} 下面。")
+        else:
+            bits.append(f"價格還在週線 MA200 的 {n0(st['ma200_w'])} 上面。")
+    if st.get("month_in_progress"):
+        mo = now_tp().month
+        if st.get("broke_prev_month_low"):
+            bits.append(f"月線 {mo} 月還沒收完，已跌破 10 月低點；" if mo == 11 else f"月線 {mo} 月還沒收完，已跌破前一個月低點；")
+        else:
+            bits.append(f"月線 {mo} 月還沒收完；")
+    side, cross = st.get("m_macd_side"), st.get("m_macd_cross")
+    if side == "零軸上" and cross == "死叉":
+        bits.append("月線 MACD 仍在零軸上死叉。")
+    elif side == "零軸下" and cross == "金叉":
+        bits.append("月線 MACD 已在零軸下金叉。")
+    elif side == "零軸下":
+        bits.append("月線 MACD 還在零軸下。")
+    elif side == "零軸上":
+        bits.append("月線 MACD 還在零軸上。")
+    p1 = "".join(bits)
+
+    midb = []
+    if cal.get("window_open"):
+        midb.append("時間上或許接近尾聲，價格卻不一定到底。")
+    else:
+        midb.append("弱勢窗口已經過了，時間上更接近尾聲，但低點還要看有沒有守住。")
+    if st.get("chart_low"):
+        midb.append(f"圖上這輪低點在 {n0(st['chart_low'])}。")
+    midb.append("鏈上還沒走到過去幾輪那種重置")
+    if st.get("lth"):
+        midb.append(f"，長期持有者成本在 {n0(st['lth'])}，還沒測到。")
+    else:
+        midb.append("。")
+    if macro.get("fresh") and macro.get("dxy_new_high"):
+        midb.append("利率沒有見頂回落，美元續強，大底還不容易確認。")
+    else:
+        midb.append("利率和美元都還沒出現轉向，大底還不容易確認。")
+    conf = []
+    if st.get("cycle_low_intact") and st.get("chart_low"):
+        conf.append("目前這個低點還沒被跌破")
+    if st.get("just_below_ma200") and st.get("week_below_ma200"):
+        conf.append("價格也才剛跌到週線 MA200 下面，還沒走到更深的位置")
+    elif st.get("week_reclaimed_ma200") or (st.get("ma200_w") and not st.get("week_below_ma200") and not st.get("below_ma200_w")):
+        conf.append("價格已站回週線 MA200")
+    if st.get("cycle_low_broken"):
+        midb.append("不過這個低點已經被收盤跌破，底部就要作廢。")
+    elif conf:
+        midb.append("不過" + "，".join(conf) + "。")
+    p2 = "".join(midb)
+
+    act = ["長線只用現貨分批，不要一次做滿。"]
+    if st.get("cycle_low_broken"):
+        act.append("週線或月線已經收盤跌破這個低點，底部作廢，下面改看長期持有者成本。")
+    else:
+        if cal.get("window_open") and cal.get("window_label"):
+            act.append(f"先看這個低點在 {cal['window_label']}以前能否守住；守住的話，明年就先把它當成較高的低點來看。")
+        else:
+            act.append("弱勢窗口已經過了，這個低點若還守住，就先把它當成較高的低點來看。")
+        act.append("週線或月線收盤跌破這個低點，底部就作廢，下面改看長期持有者成本。")
+    p3 = "".join(act)
+    return p1 + "\n\n" + p2 + "\n\n" + p3
+
+
+def macro_fixture_sentence(case: str, st: dict, macro: dict, cal: dict) -> str:
+    """四種假資料各回一句，方便核對窗口／會議過期與看錯線。"""
+    if case == "窗口已過":
+        cal = dict(cal)
+        cal["window_open"] = False
+        cal["window_label"] = cal.get("window_label") or "1 月中"
+        long = long_text_macro(st, macro, cal)
+        for ln in long.split("。"):
+            if "弱勢窗口已經過了" in ln and "低點若還守住" in ln:
+                return ln.strip() + "。"
+        return [x for x in long.split("。") if "弱勢窗口已經過了" in x][0].strip() + "。"
+    if case == "會議已過":
+        cal = dict(cal)
+        cal["meeting_upcoming"] = False
+        cal["meeting_label"] = None
+        mid = mid_text_macro(st, macro, cal)
+        for ln in mid.split("。"):
+            if "會議已經過了" in ln:
+                return ln.strip() + "。"
+        return mid
+    if case == "本輪低點被跌破":
+        st = dict(st)
+        st["cycle_low_broken"] = True
+        st["cycle_low_intact"] = False
+        long = long_text_macro(st, macro, cal)
+        for ln in long.split("。"):
+            if "底部作廢" in ln or "底部就要作廢" in ln:
+                return ln.strip() + "。"
+        return long
+    if case == "站回週線 MA200":
+        st = dict(st)
+        st["week_below_ma200"] = False
+        st["week_reclaimed_ma200"] = True
+        st["below_ma200_w"] = False
+        st["just_below_ma200"] = False
+        st["deep_below_ma200"] = False
+        long = long_text_macro(st, macro, cal)
+        # 取價格已重新站回那句
+        for ln in long.replace("！", "。").split("。"):
+            if "重新站回週線 MA200" in ln or "已站回週線 MA200" in ln:
+                return ln.strip() + "。"
+        return long
+    raise ValueError(case)
+
+
+# ---------------------------------------------------------------------------
 # 自檢
 # ---------------------------------------------------------------------------
 _NUM_RE = re.compile(
@@ -934,6 +1267,9 @@ def self_check(mid: str, long: str) -> dict:
                 errors.append(f"{name} MA120 寫法錯誤：{w}")
         if re.search(r"[\U0001F000-\U0001FAFF\u2600-\u27BF]", sec):
             errors.append(f"{name} 含 emoji")
+        for w in FORBIDDEN_EXTERNAL:
+            if w in sec:
+                errors.append(f"{name} 含禁止回填的外部數字：{w}")
         figs = extract_figures(sec)
         # 規範化後查重複（同一段）
         norm = [_normalize_num(x) for x in figs]
@@ -964,15 +1300,21 @@ def cjk_count(s: str) -> int:
     return len(re.findall(r"[\u4e00-\u9fff]", s))
 
 
-def generate(out: Path, no_cache: bool = False) -> dict:
+def generate(out: Path, no_cache: bool = False, style: str | None = None) -> dict:
     out.mkdir(parents=True, exist_ok=True)
+    style = resolve_style(style)
     short = load_short_range()
     onchain = load_onchain()
     macro = load_macro()
+    cal = load_calendar()
     market = load_or_fetch_market(out, no_cache)
     st = kline_state(market, onchain, short)
-    mid = mid_text(st, macro)
-    long = long_text(st, macro)
+    if style == "macro":
+        mid = mid_text_macro(st, macro, cal)
+        long = long_text_macro(st, macro, cal)
+    else:
+        mid = mid_text(st, macro)
+        long = long_text(st, macro)
     # 輕微修整：避免「下面。週線」漏空格已用句號；去掉「；。」並排
     mid = re.sub(r"；。", "。", mid)
     long = re.sub(r"；。", "。", long)
@@ -980,6 +1322,7 @@ def generate(out: Path, no_cache: bool = False) -> dict:
     fc = "【中期】\n" + mid.strip() + "\n\n【長期】\n" + long.strip() + "\n"
     payload = {
         "generated_at": now_tp().isoformat(),
+        "style": style,
         "kline_source": market.get("source"),
         "price": st["price"],
         "mid": mid,
@@ -1005,6 +1348,13 @@ def generate(out: Path, no_cache: bool = False) -> dict:
             "chart_low": st.get("chart_low"),
             "bear_year": st.get("bear_year"),
             "year_below_pct": st.get("year_below_pct"),
+            "week_below_ma50": st.get("week_below_ma50"),
+            "week_below_ma200": st.get("week_below_ma200"),
+            "just_below_ma200": st.get("just_below_ma200"),
+            "cycle_low_intact": st.get("cycle_low_intact"),
+            "meeting_label": cal.get("meeting_label"),
+            "window_open": cal.get("window_open"),
+            "window_label": cal.get("window_label"),
         },
     }
     (out / "forecast_midlong.txt").write_text(fc)
@@ -1013,15 +1363,35 @@ def generate(out: Path, no_cache: bool = False) -> dict:
     return payload
 
 
+def run_self_test(out: Path) -> int:
+    """讀今天資料，只改狀態後各印一句；不寫 forecast_midlong.txt。"""
+    short = load_short_range()
+    onchain = load_onchain()
+    macro = load_macro()
+    cal = load_calendar()
+    market = load_or_fetch_market(out, no_cache=False)
+    st = kline_state(market, onchain, short)
+    cases = ("窗口已過", "會議已過", "本輪低點被跌破", "站回週線 MA200")
+    for case in cases:
+        sent = macro_fixture_sentence(case, st, macro, cal)
+        print(f"{case}｜{sent}")
+    return 0
+
+
 def main() -> int:
+
     p = argparse.ArgumentParser(description="BTC 中期／長期口語模型（腳本執行，不上線）")
     p.add_argument("--out", default=str(DEFAULT_OUT), help="輸出目錄")
     p.add_argument("--forecast", action="store_true", help="把【中期】【長期】印到 stdout，供 publish 使用")
     p.add_argument("--no-cache", action="store_true", help="不使用 30 分鐘 K 線快取")
+    p.add_argument("--style", choices=["v1", "macro"], default=None, help="覆蓋 midlong_voice.json 的 style")
+    p.add_argument("--self-test", action="store_true", help="用今天資料套四種假狀況，各印一句，不改 live 輸出")
     args = p.parse_args()
+    if args.self_test:
+        return run_self_test(Path(args.out))
     out = Path(args.out)
     try:
-        payload = generate(out, no_cache=args.no_cache)
+        payload = generate(out, no_cache=args.no_cache, style=args.style)
     except Exception as e:
         print(f"midlong_model failed: {type(e).__name__}: {e}", file=sys.stderr)
         return 1
@@ -1036,7 +1406,7 @@ def main() -> int:
     text = "【中期】\n" + payload["mid"].strip() + "\n\n【長期】\n" + payload["long"].strip()
     print(text)
     print(
-        f"MIDLONG_OK mid_cjk={chk['mid_cjk']} long_cjk={chk['long_cjk']} "
+        f"MIDLONG_OK style={payload.get('style')} mid_cjk={chk['mid_cjk']} long_cjk={chk['long_cjk']} "
         f"price={payload['price']} source={payload.get('kline_source')}",
         file=sys.stderr,
     )
