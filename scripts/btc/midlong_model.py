@@ -381,7 +381,7 @@ def load_onchain() -> dict:
         try:
             js = json.loads(state_p.read_text())
             for k in ("cycle", "ath", "ath_date", "sth", "tmm", "realized", "lth", "bb_over", "bb_cool", "lth_sopr",
-                      "stood_sth", "stood_sth_month", "stood_sth_date", "data_md", "cycle_low", "cycle_low_date"):
+                      "stood_sth", "stood_sth_month", "stood_sth_date", "data_md", "cycle_low", "cycle_low_date", "sth_bbz"):
                 if js.get(k) is not None:
                     out[k] = js[k]
             out["source"] = str(state_p)
@@ -684,6 +684,7 @@ def kline_state(market: dict, onchain: dict, short: dict) -> dict:
     st["tmm"] = onchain.get("tmm")
     st["bb_over"] = onchain.get("bb_over")
     st["bb_cool"] = onchain.get("bb_cool")
+    st["sth_bbz"] = onchain.get("sth_bbz")
     st["lth"] = onchain.get("lth")
     st["lth_sopr"] = onchain.get("lth_sopr")
     st["cycle"] = onchain.get("cycle") or "跌破短期成本後的弱勢"
@@ -749,6 +750,20 @@ def kline_state(market: dict, onchain: dict, short: dict) -> dict:
 # ---------------------------------------------------------------------------
 # 組句
 # ---------------------------------------------------------------------------
+def sth_dev_phrase(z) -> str:
+    """短期持有者偏離度（與鏈上週期報告同一說法），依振盪值狀態產生；不寫布林線與價位。"""
+    if z is None:
+        return ""
+    z = float(z)
+    if z <= -1:
+        return "短期持有者偏離度掉進超賣區"
+    if z < 0:
+        return "短期持有者偏離度在均值下方，還沒進超賣區"
+    if z < 1:
+        return "短期持有者偏離度在均值上方，還沒到過熱區"
+    return "短期持有者偏離度進到過熱區"
+
+
 def mid_text(st: dict, macro: dict) -> str:
     bits = []
     below_d = st.get("below_ma120_d")
@@ -797,14 +812,8 @@ def mid_text(st: dict, macro: dict) -> str:
 
     # 現價與超賣線
     px_s = n0(st["price"])
-    if st.get("bb_over") and st.get("near_over"):
-        bits.append(f"現價 {px_s}，踩在短期持有者布林超賣線 {n0(st['bb_over'])} 附近。")
-    elif st.get("bb_over") and st.get("below_over"):
-        bits.append(f"現價 {px_s}，還在短期持有者布林超賣線 {n0(st['bb_over'])} 下方。")
-    elif st.get("bb_over"):
-        bits.append(f"現價 {px_s}，已經離開短期持有者布林超賣線。")
-    else:
-        bits.append(f"現價 {px_s}。")
+    dv = sth_dev_phrase(st.get("sth_bbz"))
+    bits.append(f"現價 {px_s}" + (f"，{dv}。" if dv else "。"))
 
     if st.get("band_lo") and st.get("band_hi"):
         if st["price"] < st["band_lo"]:
@@ -833,7 +842,7 @@ def mid_text(st: dict, macro: dict) -> str:
         act.append("週線收盤重新站回並守住週線 MA30，這套就要重估；")
     else:
         act.append("週線收盤再跌回週線 MA30 下方，這套就要重估；")
-    act.append(f"若週線收盤跌破主區間下沿 {n0(st['range_low'])}，就改按更弱的路徑來看。")
+    act.append("若週線收盤跌破主區間下沿，就改按更弱的路徑來看。")
     p3 = "".join(act)
     # 最後一句前若是「要重估；」接「若」，保持分號連接，其餘用句號分開已在片段裡
     return p1 + "\n\n" + p2 + "\n\n" + p3
@@ -1075,7 +1084,9 @@ def mid_text_macro(st: dict, macro: dict, cal: dict) -> str:
     else:
         bits.append("高低點還沒走出清楚的方向。")
 
-    bits.append(f"現價 {n0(st['price'])}。")
+    dv = sth_dev_phrase(st.get("sth_bbz"))
+    if dv:
+        bits.append(f"{dv}。")
 
     side, cross = st.get("w_macd_side"), st.get("w_macd_cross")
     if side == "零軸上" and cross == "死叉":
@@ -1102,7 +1113,7 @@ def mid_text_macro(st: dict, macro: dict, cal: dict) -> str:
     else:
         act.append("週線收盤再跌回週線 MA30 下方，這套就要重估；")
     if st.get("range_low") is not None:
-        act.append(f"若週線收盤跌破主區間下沿 {n0(st['range_low'])}，就改按更弱的路徑來看。")
+        act.append("若週線收盤跌破主區間下沿，就改按更弱的路徑來看。")
     p3 = "".join(act)
     return p1 + "\n\n" + p2 + "\n\n" + p3
 
@@ -1148,7 +1159,8 @@ def long_text_macro(st: dict, macro: dict, cal: dict) -> str:
     else:
         midb.append("弱勢窗口已經過了，時間上更接近尾聲，但低點還要看有沒有守住。")
     if st.get("chart_low"):
-        midb.append(f"圖上這輪低點在 {n0(st['chart_low'])}。")
+        _cd = st.get("chart_low_date")
+        midb.append(f"圖上這輪低點落在 {_cd.year}/{_cd.month}/{_cd.day}。" if _cd else "圖上這輪低點還在。")
     midb.append("鏈上還沒走到過去幾輪那種重置")
     if st.get("lth"):
         midb.append(f"，長期持有者成本在 {n0(st['lth'])}，還沒測到。")

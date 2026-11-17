@@ -263,7 +263,7 @@ def produce(imgdir, now=None):
     st = {"generated": now.isoformat(timespec="seconds"), "data_date": str(A["today"].date()), "data_md": md(A["today"]), "price": price,
           "cycle": text_cycle(T), "ath": c["topP"], "ath_date": ymd(c["top"]), "cycle_low": c["lowP"], "cycle_low_date": ymd(c["low"]),
           "sth": v["STHRP"], "tmm": v["TMM"], "realized": v["RP"], "lth": v["LTHRP"], "bb_over": v["BBover"], "bb_cool": v["BBcool"], "bb_heated": v["BBheat"], "bb_overheated": v["BBhot"],
-          "lth_sopr": v["LTHSOPR"], "stood_sth": A["sth_ok"] is not None, "stood_sth_date": (str(A["sth_ok"].date()) if A["sth_ok"] is not None else None),
+          "lth_sopr": v["LTHSOPR"], "sth_bbz": v["BBz"], "stood_sth": A["sth_ok"] is not None, "stood_sth_date": (str(A["sth_ok"].date()) if A["sth_ok"] is not None else None),
           "stood_sth_month": (int(A["sth_ok"].month) if A["sth_ok"] is not None else None), "below_sth_now": price < v["STHRP"]}
     fresh = all(t == "site" for t, _ in meta.values()) and (pd.Timestamp(now.date()) - A["today"]).days <= 4
     return dict(T=T, now=now, price=price, A=A, meta=meta, BC=BC, M=M, extra=extra, paths=paths, overview=op, small=sp,

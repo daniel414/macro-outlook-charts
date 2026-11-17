@@ -161,16 +161,11 @@ def big_trend(r, w, d):
     for lab, day in (("今年開盤", dt.datetime(now.year, 1, 1, tzinfo=dt.timezone.utc)), ("本月開盤", dt.datetime(now.year, now.month, 1, tzinfo=dt.timezone.utc))):
         o = open_at(day)
         if o: add(lab, 1 if px > o else -1, f"{lab} {n0(o)} {'上方' if px > o else '下方'}")
-    oc = _rd("out/repo_state/onchain_latest.json") or {}
-    cur = ((oc.get("cryptochan") or {}).get("current")) or {}
-    tmm = cur.get("tmm")
+    olv = onchain_levels()
+    tmm = olv.get("tmm")
     if tmm:
         add("tmm", 1 if px > tmm else -1, f"鏈上市場均價 {n0(tmm)} {'上方' if px > tmm else '下方'}")
-    m = re.search(r"週期位置：([^，。\n]+)", oc.get("text", ""))
-    if m: it.append(("cycle", 0, "鏈上週期：" + m.group(1)))
-    if cur:
-        sig = [cur.get("ratio", 9) < cur.get("ratio60", 0), cur.get("sthrp", 0) > cur.get("ma200", 9e9), cur.get("rev30", 0) > cur.get("rev365", 9e9)]
-        k = sum(sig); add("oc", 1 if k >= 2 else -1, f"鏈上訊號 {k}/3 偏多")
+    if olv.get("cycle"): it.append(("cycle", 0, "鏈上週期：" + olv["cycle"]))
     cq = ((_rd("out/cq_consensus.json") or {}).get("consensus")) or {}
     z = cq.get("z_score")
     if z is not None:
@@ -275,19 +270,26 @@ def _num(pat, txt):
     m = re.search(pat, txt or "")
     return float(m.group(1).replace(",", "")) if m else None
 def onchain_levels():
+    """鏈上價位（2026-11-17 起）：優先讀本機正式產出 onchain/onchain_state.json，其次讀 onchain_latest.json 的 levels（網站自有資料）。
+    舊版文字標籤只當最後備援。不再算「鏈上訊號 x/3」。"""
+    st = _rd("onchain/onchain_state.json") or {}
     oc = _rd("out/repo_state/onchain_latest.json") or {}
-    t = oc.get("text", ""); cur = ((oc.get("cryptochan") or {}).get("current")) or {}
-    lv = dict(tmm=cur.get("tmm") or _num(r"True Market Mean (\d{2,3},\d{3})(?![\d.])", t), sth=cur.get("sthrp") or _num(r"STH 成本 (\d{2,3},\d{3})(?![\d.])", t),
+    L = st if st.get("sth") else (oc.get("levels") or {})
+    if L.get("sth"):
+        return dict(tmm=L.get("tmm"), sth=L.get("sth"), hot=L.get("bb_heated"), over=L.get("bb_overheated"), cool=L.get("bb_cool"),
+                    oversold=L.get("bb_over"), cyc_low=L.get("cycle_low"), lth=L.get("lth"), realized=L.get("realized"),
+                    low_date=L.get("cycle_low_date"), cycle=L.get("cycle"), sth30=bool(L.get("stood_sth")), tmm_weeks=None,
+                    sth_mvrv=None, lth_z=None, nupl=None, sig=None, src="levels")
+    t = oc.get("text", "")
+    lv = dict(tmm=_num(r"True Market Mean (\d{2,3},\d{3})(?![\d.])", t), sth=_num(r"STH 成本 (\d{2,3},\d{3})(?![\d.])", t),
               hot=_num(r"偏熱線 (\d{2,3},\d{3})(?![\d.])", t), over=_num(r"過熱線 (\d{2,3},\d{3})(?![\d.])", t), cool=_num(r"冷卻線 (\d{2,3},\d{3})(?![\d.])", t),
               oversold=_num(r"超賣線 (\d{2,3},\d{3})(?![\d.])", t), cyc_low=_num(r"週期低點 (\d{2,3},\d{3})(?![\d.])", t), lth=_num(r"LTH 成本 (\d{2,3},\d{3})(?![\d.])", t),
-              sth_mvrv=_num(r"STH MVRV｜([\d.]+)", t), lth_z=_num(r"MVRV LTH Z｜([+-]?[\d.]+)", t), nupl=_num(r"NUPL｜([\d.]+)", t))
+              sth_mvrv=_num(r"STH MVRV｜([\d.]+)", t), lth_z=_num(r"MVRV LTH Z｜([+-]?[\d.]+)", t), nupl=_num(r"NUPL｜([\d.]+)", t), realized=None)
     m = re.search(r"這輪低點是 (\d{4}/\d+/\d+) 的 ([\d,]+)", t); lv["low_date"] = m.group(1) if m else None
     m = re.search(r"週期位置：([^，。\n]+)", t); lv["cycle"] = m.group(1) if m else None
     lv["sth30"] = "這輪 " in t and "已經做到" in t
     m = re.search(r"從 (\d+/\d+) 起價格都在其上，約 (\d+) 週", t); lv["tmm_weeks"] = m.group(2) if m else None
-    sig = None
-    if cur: sig = sum([cur.get("ratio", 9) < cur.get("ratio60", 0), cur.get("sthrp", 0) > cur.get("ma200", 9e9), cur.get("rev30", 0) > cur.get("rev365", 9e9)])
-    lv["sig"] = sig
+    lv["sig"] = None; lv["src"] = "text"
     return lv
 def zones(cands, px, below):
     """Cluster labelled levels (within 1.2%) on one side of price, nearest first."""
@@ -406,7 +408,6 @@ def forecast(price=None):
     if lv["sth"] and px > lv["sth"]: ev.append("價格在短期持有者成本之上" + ("並守住 30 天" if lv["sth30"] else ""))
     if lv["tmm"] and px > lv["tmm"]: ev.append("在鏈上市場均價之上" + (f"約 {lv['tmm_weeks']} 週" if lv["tmm_weeks"] else ""))
     if wk_up: ev.append("週線低點墊高")
-    if lv["sig"] is not None: ev.append(f"鏈上訊號 {lv['sig']}/3 偏多")
     con = []
     if lv["lth_z"] is not None: con.append(f"長期持有者 MVRV Z {lv['lth_z']:+.2f} 仍低於長期均值")
     if lv["nupl"] is not None: con.append(f"NUPL {lv['nupl']:.2f}，這輪底部比前三輪淺很多")

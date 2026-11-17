@@ -75,7 +75,7 @@ def main():
          "image_url": pinned(gh_put(m1, open(jb, "rb").read(), "btc onchain " + stamp), m1),
          "preview_url": pinned(gh_put(m2, open(jp, "rb").read(), "btc onchain preview " + stamp), m2)}
     j["levels"] = {k: R["state"][k] for k in ("data_date", "cycle", "sth", "tmm", "realized", "lth", "bb_overheated", "bb_heated", "bb_cool", "bb_over",
-                                               "cycle_low", "cycle_low_date", "ath", "ath_date", "stood_sth", "stood_sth_date")}
+                                               "cycle_low", "cycle_low_date", "ath", "ath_date", "stood_sth", "stood_sth_date", "sth_bbz")}
     sha = gh_put("btc/onchain_latest.json", json.dumps(j, ensure_ascii=False, indent=1).encode(), "btc onchain latest " + stamp)
     prune(); print("published", sha, j["image_url"], file=sys.stderr)
 if __name__ == "__main__": main()
