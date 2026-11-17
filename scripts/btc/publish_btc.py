@@ -4,6 +4,7 @@ Usage:
   publish_btc.py                 # run positioning_grid.py now, auto summary, upload
   publish_btc.py --image X.png --json posgrid.json [--text summary.txt]
   publish_btc.py --dry-run       # build files, no upload
+  MIDLONG_VOICE=0 publish_btc.py --dry-run   # 暫時關掉中長期口語（持久開關見 midlong_voice.json）
 Never pushes LINE messages; the Worker only replies."""
 import argparse, base64, glob, json, os, re, subprocess, sys, time
 from datetime import datetime
@@ -393,6 +394,60 @@ def run_short_model():
         print("short_model skipped:", e, file=sys.stderr)
         return None
 
+
+
+def _midlong_voice_config_path():
+    """和 publish_btc.py 同目錄的 midlong_voice.json（上線持久開關）；其次才看 data/。"""
+    for rel in ("midlong_voice.json", os.path.join("data", "midlong_voice.json")):
+        path = os.path.join(HERE, rel)
+        if os.path.isfile(path):
+            return path
+    return os.path.join(HERE, "midlong_voice.json")
+
+def midlong_voice_on():
+    """是否用 midlong_model.py 取代【中期】【長期】。
+    持久設定讀 midlong_voice.json 的 enabled。環境變數 MIDLONG_VOICE 若有設，暫時覆蓋。"""
+    env = os.environ.get("MIDLONG_VOICE")
+    if env is not None and str(env).strip() != "":
+        return str(env).strip().lower() in ("1", "true", "yes", "on")
+    path = _midlong_voice_config_path()
+    try:
+        d = json.loads(open(path, encoding="utf-8").read())
+        return bool(d.get("enabled"))
+    except Exception:
+        return False
+
+def _midlong_model_script():
+    for rel in (os.path.join("scripts", "midlong_model.py"), "midlong_model.py"):
+        path = os.path.join(HERE, rel)
+        if os.path.isfile(path):
+            return path
+    return None
+
+def _midlong_model_out():
+    return os.path.join(HERE, "out", "midlong")
+
+def run_midlong_model():
+    """Run midlong_model.py as a script (never import). Returns the output dir or None."""
+    script = _midlong_model_script()
+    if not script:
+        print("midlong_model skipped: script not found", file=sys.stderr)
+        return None
+    out = _midlong_model_out()
+    os.makedirs(out, exist_ok=True)
+    try:
+        r = subprocess.run([sys.executable, script, "--out", out], cwd=HERE,
+                           capture_output=True, text=True, timeout=90)
+        if r.stderr:
+            print(r.stderr.rstrip(), file=sys.stderr)
+        if r.returncode != 0:
+            print("midlong_model failed:", (r.stderr or r.stdout or "")[-500:], file=sys.stderr)
+            return None
+        return out
+    except Exception as e:
+        print("midlong_model skipped:", e, file=sys.stderr)
+        return None
+
 def fetch_levels(price=None):
     """short_model.py --levels first (script, never import); fall back to fengge_section.py --levels."""
     try:
@@ -469,7 +524,8 @@ def build_forecast(text):
         if not fc.startswith("BTC 走勢預測"): return ""
         ts = re.search(r"\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}", text)
         if ts: fc = re.sub(r"\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}", ts.group(0), fc, count=1)
-        # 走勢預測「短線」改用 short_model.py；中期、長期沿用原段
+
+        # 走勢預測「短線」改用 short_model.py；中期、長期由 midlong_voice.json（enabled）控制，環境變數可暫時覆蓋
         short = None
         sm_out = _short_model_out()
         sp = os.path.join(sm_out, "forecast_short.txt")
@@ -483,6 +539,20 @@ def build_forecast(text):
                 print("short_model splice: 找不到【短線】段", file=sys.stderr)
         else:
             print("short_model forecast not used; kept previous short section", file=sys.stderr)
+
+        # 中期、長期：midlong_voice.json enabled 或 MIDLONG_VOICE=1 才改用 midlong_model.py
+        if midlong_voice_on():
+            ml_out = run_midlong_model()
+            mp = os.path.join(ml_out or _midlong_model_out(), "forecast_midlong.txt")
+            midlong = open(mp).read().strip() if os.path.isfile(mp) else ""
+            if midlong.startswith("【中期】"):
+                fc2, n2 = re.subn(r"【中期】\s*.*\Z", midlong.rstrip() + "\n", fc, count=1, flags=re.S)
+                if n2:
+                    fc = fc2
+                else:
+                    print("midlong_model splice: 找不到【中期】段", file=sys.stderr)
+            else:
+                print("midlong_model forecast not used; kept previous mid/long section", file=sys.stderr)
         return fc   # no truncation: split into parts instead (Daniel 2026-10-24 17:38)
     except Exception as e:
         print("forecast skipped:", e, file=sys.stderr); return ""

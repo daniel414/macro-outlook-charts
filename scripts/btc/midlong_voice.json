@@ -1,0 +1,5 @@
+{
+  "enabled": true,
+  "enabled_at": "台北時間 2026-11-17 09:41",
+  "note": "Daniel 原話核准：「/btc 中期長期明天起改口語寫法，可以」。明天 06:04 例行起改用 midlong_model.py 產生【中期】【長期】，今天不另發版、不推播。環境變數 MIDLONG_VOICE 可暫時覆蓋。此檔不含金鑰或憑證。"
+}
