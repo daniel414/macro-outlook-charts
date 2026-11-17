@@ -362,8 +362,56 @@ def add_fengge(text):
         return (t[:i] + blk + t[i:] if i >= 0 else t + blk)[:4900]
     except Exception as e:
         print("fengge skipped:", e, file=sys.stderr); return text
+def _short_model_script():
+    for rel in ("short_model.py", os.path.join("scripts", "short_model.py")):
+        path = os.path.join(HERE, rel)
+        if os.path.isfile(path):
+            return path
+    return None
+
+def _short_model_out():
+    return os.path.join(HERE, "out", "short_model")
+
+def run_short_model():
+    """Run short_model.py as a script (never import). Returns the output dir or None."""
+    script = _short_model_script()
+    if not script:
+        print("short_model skipped: script not found", file=sys.stderr)
+        return None
+    out = _short_model_out()
+    os.makedirs(out, exist_ok=True)
+    try:
+        r = subprocess.run([sys.executable, script, "--out", out], cwd=HERE,
+                           capture_output=True, text=True, timeout=90)
+        if r.stderr:
+            print(r.stderr.rstrip(), file=sys.stderr)
+        if r.returncode != 0:
+            print("short_model failed:", (r.stderr or r.stdout or "")[-500:], file=sys.stderr)
+            return None
+        return out
+    except Exception as e:
+        print("short_model skipped:", e, file=sys.stderr)
+        return None
+
 def fetch_levels(price=None):
-    """fengge_section.py --levels (script, never import). Single source for short-term numbers across 摘要/完整數據/走勢預測."""
+    """short_model.py --levels first (script, never import); fall back to fengge_section.py --levels."""
+    try:
+        script = _short_model_script()
+        if script:
+            outdir = _short_model_out()
+            cmd = [sys.executable, script, "--levels", "--out", outdir]
+            out = subprocess.run(cmd, cwd=HERE, capture_output=True, text=True, timeout=90)
+            if out.stderr:
+                print(out.stderr.rstrip(), file=sys.stderr)
+            text = (out.stdout or "").strip()
+            for ln in reversed(text.splitlines()):
+                if ln.startswith("{"):
+                    return json.loads(ln)
+            lv_path = os.path.join(outdir, "levels.json")
+            if os.path.isfile(lv_path):
+                return json.loads(open(lv_path).read())
+    except Exception as e:
+        print("short_model levels skipped:", e, file=sys.stderr)
     try:
         cmd = [sys.executable, os.path.join(HERE, "fengge_section.py"), "--levels"]
         if price is not None: cmd += ["--price", str(int(float(str(price).replace(",", ""))))]
@@ -381,7 +429,8 @@ def align_levels(text, lv):
     sp = lv.get("support_pressure") or ""
     # 摘要 first line: BTC X，短線震盪/偏多/偏空 → same bias as forecast
     if bias:
-        text = re.sub(r"(BTC [\d,]+(?:\.\d+)?，)短線(?:震盪|偏多|偏空)", r"\1短線" + bias, text, count=1)
+        text = re.sub(r"(BTC [\d,]+(?:\.\d+)?，)短線(?:震盪|偏多|偏空|觀望)", r"\1短線" + bias, text, count=1)
+        text = re.sub(r"(BTC [\d,]+(?:\.\d+)?，[^\n]*?)走勢偏[多空]", r"\1短線" + bias, text, count=1)
     if watch:
         def _jiedu(m):
             pre = m.group(1).rstrip("；。，、 \t")
@@ -389,7 +438,7 @@ def align_levels(text, lv):
             if not body.endswith("。"): body += "。"
             return "解讀：" + body
         # Match 短線仍偏 / 短線偏 / 短線傾向偏 (agent prose varies)
-        text = re.sub(r"解讀：(.*?)短線(?:仍|傾向)?偏[^\n]*", _jiedu, text)
+        text = re.sub(r"解讀：(.*?)短線(?:仍|傾向)?(?:偏[^\n]*|觀望[^\n]*)", _jiedu, text)
     if sp:
         text = re.sub(r"(?m)^(?:支撐\s+[^\n]*｜壓力\s+[^\n]*|壓力\s+[^\n]*｜支撐\s+[^\n]*)$", sp, text)
     return text
@@ -420,6 +469,20 @@ def build_forecast(text):
         if not fc.startswith("BTC 走勢預測"): return ""
         ts = re.search(r"\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}", text)
         if ts: fc = re.sub(r"\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}", ts.group(0), fc, count=1)
+        # 走勢預測「短線」改用 short_model.py；中期、長期沿用原段
+        short = None
+        sm_out = _short_model_out()
+        sp = os.path.join(sm_out, "forecast_short.txt")
+        if not os.path.isfile(sp):
+            run_short_model()
+        if os.path.isfile(sp):
+            short = open(sp).read().strip()
+        if short and short.startswith("【短線】"):
+            fc, n = re.subn(r"【短線】數天\n.*?(?=\n【中期】)", short.rstrip() + "\n", fc, count=1, flags=re.S)
+            if not n:
+                print("short_model splice: 找不到【短線】段", file=sys.stderr)
+        else:
+            print("short_model forecast not used; kept previous short section", file=sys.stderr)
         return fc   # no truncation: split into parts instead (Daniel 2026-10-24 17:38)
     except Exception as e:
         print("forecast skipped:", e, file=sys.stderr); return ""
@@ -564,7 +627,9 @@ def main():
     text = align_levels(text, lv)
     fc = build_forecast(text)
     if fc: fc = align_forecast(fc, lv)
-    if fc: fc = add_src(fc)
+    # 短線改版後不在預測文加「現價來源」，避免出現來源名字
+    if fc and "【短線】數天\n短線：" not in fc:
+        fc = add_src(fc)
     if fc: text = strip_model(text)
     lead = align_levels(lead_text(), lv)
     stamp = when.strftime("%Y%m%d_%H%M")
