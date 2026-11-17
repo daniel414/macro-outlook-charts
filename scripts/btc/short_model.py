@@ -1006,107 +1006,259 @@ def macd_sentence(macd_d: dict, macd_4: dict | None = None) -> str:
     return f"{head}。"
 
 
+
+def _strip_datetimes(text: str) -> str:
+    """拿掉日期時間，避免把 11/17 09:23 或 2026.11.17 當成價位數字。"""
+    text = re.sub(r"台北時間\s+\d{1,2}/\d{1,2}\s+\d{1,2}:\d{2}", " ", text)
+    text = re.sub(r"\d{4}[./-]\d{1,2}[./-]\d{1,2}(?:\s+\d{1,2}:\d{2})?", " ", text)
+    text = re.sub(r"\d{1,2}/\d{1,2}\s+\d{1,2}:\d{2}", " ", text)
+    text = re.sub(r"\b\d{1,2}:\d{2}\b", " ", text)
+    return text
+
+
+def collect_numbers(text: str) -> dict[str, int]:
+    """正規化後的數字 → 出現次數（60,000 與 60000 視為同一個）。"""
+    counts: dict[str, int] = {}
+    for m in re.finditer(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+\.\d+|\d+", _strip_datetimes(text)):
+        key = m.group(0).replace(",", "")
+        if "." in key:
+            key = key.rstrip("0").rstrip(".")
+        if re.fullmatch(r"\d+", key):
+            key = str(int(key))
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def duplicate_numbers(text: str) -> list[tuple[str, int]]:
+    counts = collect_numbers(text)
+    return sorted(((k, n) for k, n in counts.items() if n > 1), key=lambda x: (-x[1], x[0]))
+
+
+def format_number_key(key: str) -> str:
+    if re.fullmatch(r"\d+", key) and len(key) >= 4:
+        return f"{int(key):,}"
+    return key
+
+
+def unique_number_errors(*parts: tuple[str, str]) -> list[str]:
+    """檢查多段文字，各段內同一個數字只能出現一次。"""
+    errs = []
+    for label, text in parts:
+        dups = duplicate_numbers(text)
+        if dups:
+            detail = "、".join(f"{format_number_key(k)} 出現 {n} 次" for k, n in dups)
+            errs.append(f"{label} 數字重複：{detail}")
+    return errs
+
+
 def bias_line(check: dict, rng: dict, ma_d: dict) -> tuple[str, str, str]:
-    """回傳 (方向, 目標句, 失效) 供「短線：方向｜目標句｜失效」；目標句本身不再加「目標」二字。"""
-    pos = check["position"]
-    if check["stand_firm"]["ok"]:
-        return ("偏多", f"站穩 {fmt_px(rng['stand_firm_zone'][0])}–{fmt_px(rng['stand_firm_zone'][1])} 後看最近壓力",
-                f"實體跌回 {fmt_px(rng['high'])} 下方")
-    if pos == "below":
-        return ("觀望", "等回抽失敗再看空，不追跌", f"日線收盤重新站回 {fmt_px(rng['low'])}")
+    """回傳 (方向, 目標句, 失效)，供 levels／摘要使用，不輸出成摘要行。"""
+    st = voice_state(check, rng)
+    stop = fmt_px(rng["final_stop"]) if rng and rng.get("final_stop") is not None else ""
+    invalid = f"日線收盤跌破停損{(' ' + stop) if stop else ''}" if st != "invalid" else "這套已作廢，要重算"
+    if st == "stand_firm":
+        return ("偏多", "已經突破並站上框，實體還在框上面就做多", "實體跌回框裡就認錯停損")
+    if st == "invalid":
+        return ("觀望", "這套已作廢，認錯離場", invalid)
+    if st == "lower":
+        return ("偏多", "已經靠近下沿，可以分批做現貨或小倉多", invalid)
+    if st == "upper":
+        return ("減倉", "已經靠近上沿，這裡先減倉，不要追多", invalid)
+    if st == "no_range":
+        return ("觀望", "還在急跌，先等清楚停頓再定區間", "停頓前不抄底、也不追空")
+    return ("觀望", "還在區間中間，這裡不開新單", invalid)
+
+
+def voice_state(check: dict, rng: dict | None) -> str:
+    """六種狀態：no_range / mid / lower / upper / stand_firm / invalid。"""
+    if not rng or rng.get("low") is None or rng.get("high") is None:
+        return "no_range"
+    ev = {e.get("type") for e in (check.get("events") or [])}
+    if check.get("stand_firm", {}).get("ok"):
+        return "stand_firm"
+    if "stop_break" in ev or (check.get("departed") and check.get("position") == "below"):
+        return "invalid"
+    if check.get("departed") and check.get("position") == "above":
+        return "upper"
+    pos = check.get("position")
     if pos == "lower_zone":
-        return ("偏多", f"{fmt_px(rng['fib_0786'])}、{fmt_px(rng['high'])}",
-                f"收盤跌破 {fmt_px(rng['final_stop'])}")
+        return "lower"
     if pos == "upper_zone":
-        return ("減倉", f"靠近 {fmt_px(rng['high'])} 減倉或賣",
-                f"突破並站穩 {fmt_px(rng['stand_firm_zone'][0])}–{fmt_px(rng['stand_firm_zone'][1])}")
-    # mid
-    return ("觀望",
-            f"靠近 {fmt_px(rng['high'])} 減倉；下沿 {fmt_px(rng['val'] or rng['fib_0886'])}／{fmt_px(rng['fib_0886'])}／{fmt_px(rng['low'])} 分批",
-            f"收盤跌破 {fmt_px(rng['final_stop'])}")
+        return "upper"
+    if pos in ("below", "above") and check.get("departed"):
+        return "invalid"
+    return "mid"
+
+
+def batch_levels_text(rng: dict) -> str:
+    """列出尚未寫在主區間裡的分批層；最後一層若就是下沿，寫「與下沿」。"""
+    lo = rng["low"]
+    supports = [x for x in (rng.get("lower_supports") or []) if x is not None]
+    nums, has_lo = [], False
+    for x in supports:
+        if abs(float(x) - float(lo)) < 0.51:
+            has_lo = True
+        else:
+            nums.append(fmt_px(x))
+    if nums and has_lo:
+        return "、".join(nums) + " 與下沿"
+    if nums:
+        return "、".join(nums)
+    return "下沿"
+
+
+def ma120_voice(ma_d: dict | None, style: str = "btc") -> str:
+    if not ma_d or not ma_d.get("ok"):
+        return ""
+    sma = fmt_px(ma_d["sma"])
+    if ma_d.get("price_below") and not ma_d.get("heavy_long_ok"):
+        if style == "btc":
+            return f"價格還在 MA120（{sma}）下方，均線還沒走平後被站上，只做現貨或小倉的反彈單，重倉合約多先不要碰。"
+        return f"價格還在 MA120（{sma}）下方，均線還沒走平後被站上，只做現貨或小倉反彈，重倉合約多先不要碰"
+    if ma_d.get("price_below"):
+        if style == "btc":
+            return f"價格還在 MA120（{sma}）下方，只做現貨或小倉的反彈單，重倉合約多先不要碰。"
+        return f"價格還在 MA120（{sma}）下方，只做現貨或小倉反彈，重倉合約多先不要碰"
+    if ma_d.get("heavy_long_ok"):
+        s = f"收盤已在 MA120（{sma}）上方且均線走平，可考慮重倉合約多"
+        return s + "。" if style == "btc" else s
+    s = f"收盤已在 MA120（{sma}）上方，但仍要看是否走平後被站上"
+    return s + "。" if style == "btc" else s
+
+
+def macd_voice(macd_d: dict | None, macd_4: dict | None = None, style: str = "btc") -> str:
+    if not macd_d or not macd_d.get("ok"):
+        return ""
+    deep = macd_d.get("deep")
+    line = macd_d.get("line") or 0
+    d_gold = (macd_d.get("last_cross") or {}).get("type") == "金叉"
+    f = macd_4 if macd_4 and macd_4.get("ok") else None
+    f_under_gold = bool(f and (f.get("last_cross") or {}).get("type") == "金叉" and (f.get("line") or 0) < 0)
+    if deep:
+        head = "日線 MACD 還在零軸下方很深"
+    elif line < 0:
+        head = "日線 MACD 還在零軸下方"
+    else:
+        head = "日線 MACD 已在零軸上方"
+    if line < 0 and not d_gold:
+        mid = f"{head}，沒金叉"
+    elif line < 0 and d_gold:
+        mid = f"{head}且已金叉，只算自然反彈，不能當成反轉"
+    elif d_gold:
+        mid = f"{head}，已金叉"
+    else:
+        mid = head
+    if f_under_gold and line < 0 and not d_gold:
+        if style == "btc":
+            mid += "；4 小時雖然已經在水下金叉，也只算自然反彈，不能當成反轉"
+        else:
+            mid += "；4 小時水下金叉也只算自然反彈，不能當成反轉"
+    if style == "btc" and not mid.endswith("。"):
+        mid += "。"
+    return mid
+
+
+def probe_voice(check: dict) -> str:
+    if check.get("fourh_probe") == "upper":
+        n = check.get("fourh_consecutive") or 0
+        if n >= 2:
+            return f"4 小時連續 {n} 根收盤試探上沿，日線還沒收出脫離，主區間先不重算。"
+        return "4 小時收盤試探上沿，日線還沒收出脫離，主區間先不重算。"
+    if check.get("fourh_probe") == "lower":
+        n = check.get("fourh_consecutive") or 0
+        if n >= 2:
+            return f"4 小時連續 {n} 根收盤試探下沿，日線還沒收出脫離，主區間先不重算。"
+        return "4 小時收盤試探下沿，日線還沒收出脫離，主區間先不重算。"
+    return ""
+
+
+def invalid_reason_voice(check: dict) -> str:
+    ev = {e.get("type") for e in (check.get("events") or [])}
+    if "stop_break" in ev:
+        return "日線已經收盤跌破停損，這套就作廢，認錯離場，接下來要重算。"
+    if "depart_below" in ev:
+        return "日線已經收盤跌破下沿，這套就作廢，認錯離場，接下來要重算。"
+    if check.get("departed"):
+        return "日線已經收盤脫離原先的結構，這套就作廢，認錯離場，接下來要重算。"
+    return "這套已作廢，認錯離場，接下來要重算。"
 
 
 def render_btc_short(now: datetime, market: dict, rng: dict, check: dict, ma_d: dict, ma_w: dict, macd_d: dict, macd_4: dict, scenarios: list[dict]) -> str:
+    """一段連貫文字：不加摘要行、不加劇本行，每個價位只出現一次。"""
     price = market["price"]
-    direction, target, invalid = bias_line(check, rng, ma_d)
-    lines = []
-    lines.append(f"短線：{direction}｜{target}｜失效：{invalid}")
-    pos_zh = {
-        "mid": "主區間中段，不開新單",
-        "lower_zone": "下沿分批區，可分批現貨或小倉多",
-        "upper_zone": "靠近上沿，減倉或賣",
-        "below": "已收盤脫離下沿",
-        "above": "已收盤脫離上沿",
-    }[check["position"]]
-    probe_txt = ""
-    if check.get("fourh_probe") == "upper":
-        probe_txt = "4h 試探上沿，日線尚未收出脫離，不重算主區間。"
-        if check.get("fourh_consecutive", 0) >= 2:
-            probe_txt = f"4h 連續 {check['fourh_consecutive']} 根收盤試探上沿，日線尚未收出脫離，不重算主區間。"
-    elif check.get("fourh_probe") == "lower":
-        probe_txt = "4h 試探下沿，日線尚未收出脫離，不重算主區間。"
-        if check.get("fourh_consecutive", 0) >= 2:
-            probe_txt = f"4h 連續 {check['fourh_consecutive']} 根收盤試探下沿，日線尚未收出脫離，不重算主區間。"
-    lines.append(
-        f"現價 {fmt_px(price)}，{fmt_time_text(now)}，"
-        f"位於 {fmt_px(rng['low'])}–{fmt_px(rng['high'])} {pos_zh}。"
-        + probe_txt
+    st = voice_state(check, rng)
+    time_s = fmt_time_text(now)
+    ma = ma120_voice(ma_d, "btc")
+    macd = macd_voice(macd_d, macd_4, "btc")
+    probe = probe_voice(check)
+    head = f"現價 {fmt_px(price)}，{time_s}，"
+    if st == "no_range":
+        body = (
+            head + "還在急跌，先等日線長下影收回，或連續至少 3 根日線橫盤、最後一根不再創新低，再定區間；"
+            "停頓前，不抄底、也不追空。"
+        )
+        text = body + ma + macd
+        return text.strip() + "\n"
+    lo, hi = fmt_px(rng["low"]), fmt_px(rng["high"])
+    stop = fmt_px(rng["final_stop"])
+    batch = batch_levels_text(rng)
+    confirm = fmt_px(rng["stand_firm_zone"][1])
+    if st == "invalid":
+        body = head + invalid_reason_voice(check)
+        body += f"原主區間是 {lo} 到 {hi}，原停損 {stop}。"
+        return (body + ma + macd).strip() + "\n"
+    if st == "stand_firm":
+        z0, z1 = fmt_px(rng["stand_firm_zone"][0]), fmt_px(rng["stand_firm_zone"][1])
+        body = (
+            head + f"已經突破並站上框。前高框是 {z0} 到 {z1}："
+            "實體還在框上面就做多，實體跌回框裡就認錯停損，必要時反手。"
+            "目標先看最近的密集區，不要看太遠。"
+        )
+        return (body + ma + macd).strip() + "\n"
+    if st == "lower":
+        loc = "已經靠近下沿，可以分批做現貨或小倉多"
+    elif st == "upper":
+        loc = "已經靠近上沿，這裡先減倉，不要追多"
+    else:
+        loc = "還在主區間中間，這裡不開新單"
+    body = (
+        head + f"{loc}。主區間是 {lo} 到 {hi}：靠近 {batch}，再分批現貨或小倉多，停損 {stop}；"
     )
-    gate = (ma_d.get("gate") + "。") if ma_d.get("ok") and ma_d.get("gate") else ""
-    macd_txt = macd_sentence(macd_d, macd_4)
-    extra = (gate + macd_txt).strip()
-    if extra:
-        lines.append(extra)
-    # 精簡劇本行（固定 2–3 條要點，不把中段小結構寫成主區間）
-    lines.append(
-        f"劇本：靠近 {fmt_px(rng['val'] or rng['fib_0886'])}／{fmt_px(rng['fib_0886'])}／{fmt_px(rng['low'])} "
-        f"分批現貨或小倉多，停損 {fmt_px(rng['final_stop'])}；靠近 {fmt_px(rng['high'])} 減倉；"
-        f"要突破並站穩 {fmt_px(rng['stand_firm_zone'][0])}–{fmt_px(rng['stand_firm_zone'][1])} 才確認轉強。"
-    )
-    if check["departed"]:
-        lines.append(f"結構脫離：{check['reason_text']}。以上為重算後的主區間與劇本。")
-    return "\n".join(lines) + "\n"
+    if st == "upper":
+        body += f"要突破並站穩 {confirm} 確認帶才算轉強，還沒站穩以前，中間也不開新單。"
+    else:
+        body += f"靠近上沿就減倉，要突破並站穩 {confirm} 確認帶才算轉強。"
+    text = body + ma + macd + probe
+    return text.strip() + "\n"
 
 
-def render_report(now: datetime, market: dict, rng: dict, check: dict, ma_d: dict, macd_d: dict, macd_4: dict | None = None) -> str:
-    price = market["price"]
-    supports = "、".join(fmt_px(x) for x in rng["lower_supports"])
-    lines = []
-    lines.append(f"現價｜{fmt_px(price)} 美元，{fmt_time_text(now)}")
-    bank = load_btc_bank_target()
-    if bank:
-        lines.append(f"投行目標｜{bank}")
-    lines.append(
-        f"關鍵價位｜主區間 {fmt_px(rng['low'])}–{fmt_px(rng['high'])}；"
-        f"下方 {supports}；最終停損 {fmt_px(rng['final_stop'])}；"
-        f"上沿確認 {fmt_px(rng['stand_firm_zone'][0])}–{fmt_px(rng['stand_firm_zone'][1])}"
-    )
-    pos_zh = {
-        "mid": "現價在主區間中段，不開新單",
-        "lower_zone": "現價已靠近下沿，可分批現貨或小倉多",
-        "upper_zone": "現價靠近上沿，減倉或賣",
-        "below": "收盤已脫離主區間下沿",
-        "above": "收盤已脫離主區間上沿",
-    }[check["position"]]
-    obs = (
-        f"觀察｜{pos_zh}。"
-        f"靠近下沿才分批現貨或小倉多，靠近 {fmt_px(rng['high'])} 減倉；"
-        f"要突破並站穩 {fmt_px(rng['stand_firm_zone'][0])}–{fmt_px(rng['stand_firm_zone'][1])} 才確認轉強。"
-    )
-    if check.get("fourh_probe") == "upper":
-        obs += "4h 試探上沿，日線尚未收出脫離，不重算主區間。"
-    elif check.get("fourh_probe") == "lower":
-        obs += "4h 試探下沿，日線尚未收出脫離，不重算主區間。"
-    if ma_d.get("ok"):
-        obs += f"日線 MA120 在 {fmt_px(ma_d['sma'])}，{ma_d['gate']}。"
-    macd_txt = macd_sentence(macd_d, macd_4)
-    if macd_txt:
-        obs += macd_txt
-    if check["departed"]:
-        obs += f"結構脫離原因：{check['reason_text']}。"
-    lines.append(obs)
-    return "\n".join(lines) + "\n"
+def key_levels_voice(rng: dict, st: str) -> str:
+    if st == "no_range":
+        return "尚未形成主區間"
+    lo, hi = fmt_px(rng["low"]), fmt_px(rng["high"])
+    stop = fmt_px(rng["final_stop"])
+    if st == "invalid":
+        return f"原主區間 {lo}–{hi}；原停損 {stop}"
+    if st == "stand_firm":
+        z0, z1 = fmt_px(rng["stand_firm_zone"][0]), fmt_px(rng["stand_firm_zone"][1])
+        return f"前高框 {z0}–{z1}；目標先看最近的密集區；跌回後反手停損看框內"
+    batch = batch_levels_text(rng)
+    confirm = fmt_px(rng["stand_firm_zone"][1])
+    return f"主區間 {lo}–{hi}；分批 {batch}；停損 {stop}；上沿確認到 {confirm}"
 
+
+def short_direction_voice(st: str, check: dict) -> str:
+    if st == "no_range":
+        return "還在急跌，先等日線長下影收回，或連續至少 3 根日線橫盤、最後一根不再創新低，再定區間；停頓前，不抄底、也不追空。"
+    if st == "invalid":
+        return invalid_reason_voice(check)
+    if st == "stand_firm":
+        return "已經突破並站上框，實體還在框上面就做多；實體跌回框裡就認錯停損，必要時反手。目標先看最近的密集區，不要看太遠。"
+    if st == "lower":
+        return "已經靠近下沿，可以分批做現貨或小倉多，停損放在已寫的位置。靠近上沿就減倉；要突破並站穩確認帶，才算轉強。"
+    if st == "upper":
+        return "已經靠近上沿，這裡先減倉，不要追多。要突破並站穩確認帶，才算轉強；還沒站穩以前，中間也不開新單。"
+    return "還在區間中間，這裡不開新單。靠近下沿再分批現貨或小倉多，靠近上沿就減倉；要突破並站穩確認帶，才算轉強。"
 
 
 BANK_TARGET_FILE = Path("/workspace/big-players/bank-targets/briefing_lines.txt")
@@ -1123,7 +1275,6 @@ def load_btc_bank_target(path: Path | None = None) -> str | None:
         s = ln.strip()
         if not s.startswith("BTC"):
             continue
-        # BTC<tab or spaces>投行目標｜加權 93,242（區間 69,107–117,376；…）
         m = re.search(
             r"投行目標｜\s*(加權\s*[0-9,]+（區間\s*[0-9,]+[–-][0-9,]+)",
             s,
@@ -1136,76 +1287,46 @@ def load_btc_bank_target(path: Path | None = None) -> str | None:
     return None
 
 
-def ma120_slim_line(ma_d: dict) -> str:
-    if not ma_d or not ma_d.get("ok"):
-        return ""
-    sma = fmt_px(ma_d["sma"])
-    if ma_d.get("price_below") and not ma_d.get("heavy_long_ok"):
-        body = "價格在下方且均線未走平，只准現貨或小倉反彈單"
-    elif ma_d.get("price_below"):
-        body = "價格在下方，只准現貨或小倉反彈單"
-    elif ma_d.get("heavy_long_ok"):
-        body = "收盤在上方且均線走平，可考慮重倉合約多"
-    else:
-        body = "收盤在上方，但仍要看是否走平後突破"
-    return f"日線 MA120 在 {sma}，{body}"
-
-
-def macd_slim_line(macd_d: dict) -> str:
-    """精簡版只寫日線 MACD，控制在約 320 字。"""
-    if not macd_d or not macd_d.get("ok"):
-        return ""
-    deep = macd_d.get("deep")
-    line = macd_d.get("line") or 0
-    d_gold = (macd_d.get("last_cross") or {}).get("type") == "金叉"
-    if deep:
-        head = "日線 MACD 在零軸下方很深"
-    elif line < 0:
-        head = "日線 MACD 在零軸下方"
-    else:
-        head = "日線 MACD 在零軸上方"
-    if line < 0 and not d_gold:
-        return f"{head}，尚未金叉，只算自然反彈"
-    if line < 0 and d_gold:
-        return f"{head}且已金叉，只算自然反彈，不能當反轉確認"
-    if d_gold:
-        return f"{head}，已金叉"
-    return head
-
-
-def render_report_slim(now: datetime, market: dict, rng: dict, check: dict, ma_d: dict, macd_d: dict) -> str:
+def render_report(now: datetime, market: dict, rng: dict, check: dict, ma_d: dict, macd_d: dict, macd_4: dict | None = None) -> str:
     price = market["price"]
-    supports = "、".join(fmt_px(x) for x in rng["lower_supports"])
-    pos_zh = {
-        "mid": "現價在主區間中段，不開新單",
-        "lower_zone": "現價已靠近下沿，可分批現貨或小倉多",
-        "upper_zone": "現價靠近上沿，減倉或賣",
-        "below": "收盤已脫離主區間下沿",
-        "above": "收盤已脫離主區間上沿",
-    }[check["position"]]
-    direction = (
-        f"{pos_zh}；靠近下沿才分批現貨或小倉多，"
-        f"要突破並站穩 {fmt_px(rng['stand_firm_zone'][0])}–{fmt_px(rng['stand_firm_zone'][1])} 才確認轉強"
-    )
+    st = voice_state(check, rng)
+    lines = [f"現價｜{fmt_px(price)} 美元，{fmt_time_text(now)}"]
+    bank = load_btc_bank_target()
+    if bank:
+        lines.append(f"投行目標｜{bank}")
+    lines.append(f"關鍵價位｜{key_levels_voice(rng, st)}")
+    obs = short_direction_voice(st, check)
+    ma = ma120_voice(ma_d, "report")
+    macd = macd_voice(macd_d, macd_4, "report")
+    if ma:
+        obs += ma if obs.endswith("。") else ("。" + ma if ma else "")
+        if not obs.endswith("。"):
+            obs += "。"
+    if macd:
+        obs += macd if macd.endswith("。") else macd + "。"
+    probe = probe_voice(check)
+    if probe:
+        obs += probe
+    lines.append("觀察｜" + obs)
+    return "\n".join(lines) + "\n"
+
+
+def render_report_slim(now: datetime, market: dict, rng: dict, check: dict, ma_d: dict, macd_d: dict, macd_4: dict | None = None) -> str:
+    price = market["price"]
+    st = voice_state(check, rng)
     bank = load_btc_bank_target() or ""
     lines = ["【/report 精簡版】"]
     lines.append(f"現價｜{fmt_px(price)} 美元，{fmt_time_text(now)}")
-    if bank:
-        lines.append(f"投行目標｜{bank}")
-    else:
-        lines.append("投行目標｜")
-    lines.append(
-        f"關鍵價位｜主區間 {fmt_px(rng['low'])}–{fmt_px(rng['high'])}；"
-        f"分批 {supports}；停損 {fmt_px(rng['final_stop'])}"
-    )
-    lines.append(f"短線方向｜{direction}")
+    lines.append(f"投行目標｜{bank}" if bank else "投行目標｜")
+    lines.append(f"關鍵價位｜{key_levels_voice(rng, st)}")
+    lines.append(f"短線方向｜{short_direction_voice(st, check).rstrip('。')}。")
     bullets = []
-    ma_l = ma120_slim_line(ma_d)
-    if ma_l:
-        bullets.append("・" + ma_l)
-    macd_l = macd_slim_line(macd_d)
-    if macd_l:
-        bullets.append("・" + macd_l)
+    ma = ma120_voice(ma_d, "report")
+    if ma:
+        bullets.append("・" + ma.rstrip("。"))
+    macd = macd_voice(macd_d, macd_4, "report")
+    if macd:
+        bullets.append("・" + macd.rstrip("。"))
     if bullets:
         lines.append("")
         lines.extend(bullets[:2])
@@ -1271,7 +1392,7 @@ def run(out_dir: Path, force_recompute: bool = False, seed: bool = False, market
     }
     btc_txt = render_btc_short(now, market, rng, check, ma_d, ma_w, macd_d, macd_4, state["scenarios"])
     report_txt = render_report(now, market, rng, check, ma_d, macd_d, macd_4)
-    slim_txt = render_report_slim(now, market, rng, check, ma_d, macd_d)
+    slim_txt = render_report_slim(now, market, rng, check, ma_d, macd_d, macd_4)
 
     (out_dir / "short_model.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
     (out_dir / "btc_short.txt").write_text(btc_txt)
@@ -1295,6 +1416,12 @@ def run(out_dir: Path, force_recompute: bool = False, seed: bool = False, market
     }
     (out_dir / "levels.json").write_text(json.dumps(levels, ensure_ascii=False) + "\n")
     payload["levels"] = levels
+    uniq_errs = unique_number_errors(("/btc 短線段", btc_txt), ("report_slim.txt", slim_txt))
+    payload["unique_check"] = {"ok": not uniq_errs, "errors": uniq_errs}
+    if uniq_errs:
+        for e in uniq_errs:
+            print(e, file=sys.stderr)
+        raise SystemExit(1)
     # 狀態檔只保留劇本與主區間，供隔日比對；不把每次現價寫死成新劇本
     persist = {
         "version": state.get("version", 1),
@@ -1308,6 +1435,67 @@ def run(out_dir: Path, force_recompute: bool = False, seed: bool = False, market
     return payload
 
 
+def demo_states(out_dir: Path) -> int:
+    """六種狀態樣稿（假資料），供檢查口語模板與數字不重複。"""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    now = datetime(2026, 11, 17, 9, 30, tzinfo=TAIPEI)
+    rng = {
+        "low": 60000.0, "high": 67000.0, "final_stop": 57800.0,
+        "lower_supports": [61800.0, 61174.0, 60000.0],
+        "stand_firm_zone": [67000.0, 67500.0],
+        "val": 61800.0, "fib_0886": 61174.0,
+    }
+    ma_d = {"ok": True, "sma": 75568.5, "price_below": True, "heavy_long_ok": False, "flatish": True}
+    macd_d = {"ok": True, "deep": True, "line": -3000, "last_cross": {"type": "none"}}
+    macd_4 = {"ok": True, "line": -100, "last_cross": {"type": "金叉"}}
+
+    def chk(pos, departed=False, sf=False, events=None):
+        return {
+            "position": pos, "departed": departed,
+            "stand_firm": {"ok": sf}, "events": events or [],
+            "fourh_probe": None, "fourh_consecutive": 0,
+            "recompute": departed, "reason_text": "",
+        }
+
+    cases = [
+        ("1_no_range", {"price": 64655.0, "klines": {}}, {}, chk("mid")),
+        ("2_mid", {"price": 64655.0, "klines": {}}, rng, chk("mid")),
+        ("3_lower", {"price": 61500.0, "klines": {}}, rng, chk("lower_zone")),
+        ("4_upper", {"price": 66500.0, "klines": {}}, rng, chk("upper_zone")),
+        ("5_stand_firm", {"price": 67200.0, "klines": {}}, rng, chk("above", True, True, [{"type": "stand_firm"}])),
+        ("6_invalid", {"price": 57000.0, "klines": {}}, rng, chk("below", True, False, [{"type": "stop_break"}, {"type": "depart_below"}])),
+    ]
+    failed = 0
+    for name, market, r, check in cases:
+        btc = render_btc_short(now, market, r, check, ma_d, {}, macd_d, macd_4, [])
+        slim = render_report_slim(now, market, r, check, ma_d, macd_d, macd_4)
+        (out_dir / f"{name}_btc.txt").write_text(btc)
+        (out_dir / f"{name}_slim.txt").write_text(slim)
+        errs = unique_number_errors(("/btc 短線段", btc), ("report_slim.txt", slim))
+        other = []
+        blob = btc + slim
+        if "劇本：" in blob or blob.lstrip().startswith("短線："):
+            other.append("仍有摘要行或劇本行")
+        if "數天" in blob or "數週" in blob or "數周" in blob:
+            other.append("仍有週期標籤")
+        if "以及下沿" in blob:
+            other.append("分批仍寫「以及下沿」，應寫「與下沿」")
+        if "4h" in blob or "4H" in blob:
+            other.append("仍寫 4h，應寫 4 小時")
+        st = voice_state(check, r)
+        status = "PASS" if not errs and not other else "FAIL"
+        if status == "FAIL":
+            failed += 1
+        print(f"{status} {name} state={st}")
+        print(btc.strip())
+        if errs or other:
+            print("  ", "；".join(errs + other))
+        print()
+    print("DEMO_FAILS", failed)
+    return 1 if failed else 0
+
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="BTC 短線模型每日檢查（試做，不上線）")
     p.add_argument("--out", default=str(DEFAULT_OUT), help="輸出目錄")
@@ -1315,7 +1503,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--force-recompute", action="store_true", help="強制重算主區間（試做／除錯用）")
     p.add_argument("--forecast-short", action="store_true", help="只把【短線】段印到 stdout，供 publish 使用")
     p.add_argument("--levels", action="store_true", help="只把 levels JSON 印到 stdout，供 publish 使用")
+    p.add_argument("--demo-states", metavar="DIR", help="用假資料輸出六種狀態樣稿並做數字自檢，不抓盤")
     args = p.parse_args(argv)
+    if args.demo_states:
+        return demo_states(Path(args.demo_states))
     payload = run(Path(args.out), force_recompute=args.force_recompute, seed=args.seed)
     chk = payload["check"]
     status = (f"來源 {payload['kline_source']}  現價 {payload['price']:.1f}  "

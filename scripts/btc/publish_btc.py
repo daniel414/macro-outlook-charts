@@ -628,7 +628,7 @@ def main():
     fc = build_forecast(text)
     if fc: fc = align_forecast(fc, lv)
     # 短線改版後不在預測文加「現價來源」，避免出現來源名字
-    if fc and "【短線】\n短線：" not in fc and "【短線】數天\n短線：" not in fc:
+    if fc and "【短線】\n短線：" not in fc and "【短線】數天\n短線：" not in fc and "【短線】\n現價" not in fc:
         fc = add_src(fc)
     if fc: text = strip_model(text)
     lead = align_levels(lead_text(), lv)
