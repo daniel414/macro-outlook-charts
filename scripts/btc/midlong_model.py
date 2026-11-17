@@ -641,24 +641,26 @@ def kline_state(market: dict, onchain: dict, short: dict) -> dict:
     st["m_macd_cross"] = xtm
     st["m_macd_side"] = "零軸上" if (st["m_macd_line"] or 0) >= 0 else "零軸下"
 
-    # 圖上本輪低點：年內日線最低，或短線停損錨
-    ytd = [r for r in d1 if datetime.fromtimestamp(r["open_time"] / 1000, TZ).year == year]
-    if ytd:
-        lo = min(ytd, key=lambda r: r["low"])
-        st["chart_low"] = lo["low"]
-        st["chart_low_date"] = datetime.fromtimestamp(lo["open_time"] / 1000, TZ)
-    else:
-        st["chart_low"] = short.get("stop") or 57800.0
-        st["chart_low_date"] = None
-
-    # 前高：鏈上優先
-    st["ath"] = onchain.get("ath")
-    st["ath_date"] = onchain.get("ath_date")
-    if not st["ath"] and d1:
+    # 這輪前高：幣安日 K 盤中最高（自動找，不寫死日期）；低點取前高之後的盤中最低。
+    # 不再優先用鏈上文字解析的前高，避免和日 K 盤中口徑不一致。
+    if d1:
         a = max(d1, key=lambda r: r["high"])
         st["ath"] = a["high"]
         ad = datetime.fromtimestamp(a["open_time"] / 1000, TZ)
         st["ath_date"] = f"{ad.year}/{ad.month}/{ad.day}"
+        after = [r for r in d1 if r["open_time"] > a["open_time"]]
+        if after:
+            lo = min(after, key=lambda r: r["low"])
+            st["chart_low"] = lo["low"]
+            st["chart_low_date"] = datetime.fromtimestamp(lo["open_time"] / 1000, TZ)
+        else:
+            st["chart_low"] = short.get("stop") or 57800.0
+            st["chart_low_date"] = None
+    else:
+        st["ath"] = onchain.get("ath")
+        st["ath_date"] = onchain.get("ath_date")
+        st["chart_low"] = short.get("stop") or 57800.0
+        st["chart_low_date"] = None
 
     st["sth"] = onchain.get("sth")
     st["tmm"] = onchain.get("tmm")
