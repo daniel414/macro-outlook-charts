@@ -862,8 +862,8 @@ def long_text(st: dict, macro: dict) -> str:
         else:
             midb.append(f"長期持有者成本在 {n0(st['lth'])}。")
     # 總經定性，避免重複中期已寫的數字
-    if macro.get("fresh"):
-        midb.append("選後利率沒回落、美元續強，大底要等利率見頂回落才容易確認。")
+    if macro.get("fresh") and macro.get("dxy_new_high"):
+        midb.append("利率沒回落、美元續強，大底要等利率見頂回落才容易確認。")
     else:
         midb.append("利率和美元都還沒出現轉向，大底要等利率見頂回落才容易確認。")
     p2 = "".join(midb)
