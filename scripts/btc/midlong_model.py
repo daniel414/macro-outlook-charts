@@ -1300,7 +1300,7 @@ def cjk_count(s: str) -> int:
     return len(re.findall(r"[\u4e00-\u9fff]", s))
 
 
-def generate(out: Path, no_cache: bool = False, style: str | None = None) -> dict:
+def generate(out: Path, no_cache: bool = False, style: str | None = None, price: float | None = None) -> dict:
     out.mkdir(parents=True, exist_ok=True)
     style = resolve_style(style)
     short = load_short_range()
@@ -1308,6 +1308,10 @@ def generate(out: Path, no_cache: bool = False, style: str | None = None) -> dic
     macro = load_macro()
     cal = load_calendar()
     market = load_or_fetch_market(out, no_cache)
+    if price is not None:
+        market = dict(market)
+        market["price"] = float(price)
+        market["price_override"] = True
     st = kline_state(market, onchain, short)
     if style == "macro":
         mid = mid_text_macro(st, macro, cal)
@@ -1386,12 +1390,16 @@ def main() -> int:
     p.add_argument("--no-cache", action="store_true", help="不使用 30 分鐘 K 線快取")
     p.add_argument("--style", choices=["v1", "macro"], default=None, help="覆蓋 midlong_voice.json 的 style")
     p.add_argument("--self-test", action="store_true", help="用今天資料套四種假狀況，各印一句，不改 live 輸出")
+    p.add_argument("--price", type=float, default=None, help="沿用發布標題現價，不用 K 線快取的現價")
     args = p.parse_args()
     if args.self_test:
         return run_self_test(Path(args.out))
     out = Path(args.out)
+    price = args.price
+    if price is None and os.environ.get("BTC_SPOT_PRICE"):
+        price = float(os.environ["BTC_SPOT_PRICE"].replace(",", ""))
     try:
-        payload = generate(out, no_cache=args.no_cache, style=args.style)
+        payload = generate(out, no_cache=args.no_cache, style=args.style, price=price)
     except Exception as e:
         print(f"midlong_model failed: {type(e).__name__}: {e}", file=sys.stderr)
         return 1

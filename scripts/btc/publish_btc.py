@@ -407,16 +407,23 @@ def _short_model_script():
 def _short_model_out():
     return os.path.join(HERE, "out", "short_model")
 
-def run_short_model():
-    """Run short_model.py as a script (never import). Returns the output dir or None."""
+def run_short_model(price=None, when=None):
+    """Run short_model.py as a script (never import). Returns the output dir or None.
+    price／when 為發布標題的統一現價與時間，傳給 --price／--when，不再讓短線自己抓價。"""
     script = _short_model_script()
     if not script:
         print("short_model skipped: script not found", file=sys.stderr)
         return None
     out = _short_model_out()
     os.makedirs(out, exist_ok=True)
+    cmd = [sys.executable, script, "--out", out]
+    if price is not None:
+        cmd += ["--price", str(price)]
+    if when is not None:
+        ts = when.strftime("%Y-%m-%d %H:%M") if hasattr(when, "strftime") else str(when)
+        cmd += ["--when", ts]
     try:
-        r = subprocess.run([sys.executable, script, "--out", out], cwd=HERE,
+        r = subprocess.run(cmd, cwd=HERE,
                            capture_output=True, text=True, timeout=90)
         if r.stderr:
             print(r.stderr.rstrip(), file=sys.stderr)
@@ -460,16 +467,20 @@ def _midlong_model_script():
 def _midlong_model_out():
     return os.path.join(HERE, "out", "midlong")
 
-def run_midlong_model():
-    """Run midlong_model.py as a script (never import). Returns the output dir or None."""
+def run_midlong_model(price=None):
+    """Run midlong_model.py as a script (never import). Returns the output dir or None.
+    price 為發布標題的統一現價，傳給 --price，不用 K 線快取裡的現價。"""
     script = _midlong_model_script()
     if not script:
         print("midlong_model skipped: script not found", file=sys.stderr)
         return None
     out = _midlong_model_out()
     os.makedirs(out, exist_ok=True)
+    cmd = [sys.executable, script, "--out", out]
+    if price is not None:
+        cmd += ["--price", str(price)]
     try:
-        r = subprocess.run([sys.executable, script, "--out", out], cwd=HERE,
+        r = subprocess.run(cmd, cwd=HERE,
                            capture_output=True, text=True, timeout=90)
         if r.stderr:
             print(r.stderr.rstrip(), file=sys.stderr)
@@ -481,13 +492,25 @@ def run_midlong_model():
         print("midlong_model skipped:", e, file=sys.stderr)
         return None
 
-def fetch_levels(price=None):
-    """short_model.py --levels first (script, never import); fall back to fengge_section.py --levels."""
+def fetch_levels(price=None, when=None, reuse=False):
+    """short_model.py --levels first (script, never import); fall back to fengge_section.py --levels.
+    reuse=True：直接讀剛剛 run_short_model 寫好的 levels.json，不再重跑。"""
+    outdir = _short_model_out()
+    lv_path = os.path.join(outdir, "levels.json")
+    if reuse and os.path.isfile(lv_path):
+        try:
+            return json.loads(open(lv_path, encoding="utf-8").read())
+        except Exception:
+            pass
     try:
         script = _short_model_script()
         if script:
-            outdir = _short_model_out()
             cmd = [sys.executable, script, "--levels", "--out", outdir]
+            if price is not None:
+                cmd += ["--price", str(price)]
+            if when is not None:
+                ts = when.strftime("%Y-%m-%d %H:%M") if hasattr(when, "strftime") else str(when)
+                cmd += ["--when", ts]
             out = subprocess.run(cmd, cwd=HERE, capture_output=True, text=True, timeout=90)
             if out.stderr:
                 print(out.stderr.rstrip(), file=sys.stderr)
@@ -546,9 +569,10 @@ MODEL_RE = r"\n*" + re.escape(DIV) + r"\n【(?:短線)?交易模型】.*?(?=\n\n
 def strip_model(text):
     """Drop 【交易模型】 from the data message (it now lives in forecast_text)."""
     return re.sub(MODEL_RE, "", text, flags=re.S).rstrip()
-def build_forecast(text):
+def build_forecast(text, price=None, when=None):
     """BTC 走勢預測 (fengge_section.py --forecast, run as a script; Daniel 2026-10-24 16:58). "" on failure.
-    The time line reuses the summary's timestamp so the Worker footer time is identical."""
+    The time line reuses the summary's timestamp so the Worker footer time is identical.
+    price／when 傳給 midlong（與已寫好的 short 段），與標題現價同一份。"""
     try:
         head = "\n".join(text.splitlines()[:3])
         m = re.search(r"｜BTC ([\d,]+(?:\.\d+)?)", head)
@@ -562,7 +586,7 @@ def build_forecast(text):
         sm_out = _short_model_out()
         sp = os.path.join(sm_out, "forecast_short.txt")
         if not os.path.isfile(sp):
-            run_short_model()
+            run_short_model(price=price, when=when)
         if os.path.isfile(sp):
             short = open(sp).read().strip()
         if short and short.startswith("【短線】"):
@@ -573,7 +597,7 @@ def build_forecast(text):
             print("short_model forecast not used; kept previous short section", file=sys.stderr)
         # 中期、長期：midlong_voice.json enabled 或 MIDLONG_VOICE=1 才改用 midlong_model.py
         if midlong_voice_on():
-            ml_out = run_midlong_model()
+            ml_out = run_midlong_model(price=price)
             mp = os.path.join(ml_out or _midlong_model_out(), "forecast_midlong.txt")
             midlong = open(mp).read().strip() if os.path.isfile(mp) else ""
             if midlong.startswith("【中期】"):
@@ -729,12 +753,23 @@ def main():
     else: sys.exit("need --text or --json (or run without args)")
     text = strip_price_source(apply_chainlink(text, j.get("btc") if j else None))
     text = add_notes(strip_hl(add_binance(add_fengge(add_consensus(add_longshort(add_rvw(add_range(add_structure(text)))))))))
-    # Single source of short-term levels (short_bias) for 摘要 / 完整數據 解讀 / 走勢預測
+    # 統一現價：標題（Chainlink 檢查後）的那一個數字與時間，傳給短線／中長期
     _pm = re.search(r"｜BTC ([\d,]+(?:\.\d+)?)", "\n".join(text.splitlines()[:3]))
-    lv = fetch_levels(_pm.group(1) if _pm else (j.get("btc") if j else None))
+    spot = None
+    if PRICE.get("new"):
+        try:
+            spot = float(str(PRICE["new"]).replace(",", ""))
+        except ValueError:
+            spot = None
+    if spot is None and _pm:
+        spot = float(_pm.group(1).replace(",", ""))
+    if spot is None and j.get("btc") is not None:
+        spot = float(j.get("btc"))
+    run_short_model(price=spot, when=when)
+    lv = fetch_levels(spot, when=when, reuse=True)
     if lv: print("LEVELS", json.dumps({k: lv[k] for k in ("bias","targets","inv","nxt","forecast_invalid","support_pressure") if k in lv}, ensure_ascii=False), file=sys.stderr)
     text = align_levels(text, lv)
-    fc = build_forecast(text)
+    fc = build_forecast(text, price=spot, when=when)
     if fc: fc = align_forecast(fc, lv)
     # 短線改版後不在預測文加「現價來源」，避免出現來源名字
     if fc:

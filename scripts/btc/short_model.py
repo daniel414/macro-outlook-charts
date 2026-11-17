@@ -17,7 +17,7 @@ K 線：先試幣安現貨 api.binance.com /api/v3/klines（4h／1d／1w）。
 """
 from __future__ import annotations
 
-import argparse
+import argparse, os
 import json
 import re
 import math
@@ -166,8 +166,9 @@ def _fetch_bitstamp(interval: str, limit: int, now_ms: int) -> list[dict]:
     return rows
 
 
-def fetch_market(limit_4h: int = 500, limit_1d: int = 400, limit_1w: int = 200) -> dict:
-    """回傳 klines 與來源名稱。失敗才往下一個免費現貨來源。"""
+def fetch_market(limit_4h: int = 500, limit_1d: int = 400, limit_1w: int = 200, skip_ticker: bool = False) -> dict:
+    """回傳 klines 與來源名稱。失敗才往下一個免費現貨來源。
+    skip_ticker：發布端已傳入統一現價時，不再自己抓 ticker，暫用最後一根 K 線收盤，稍後覆寫。"""
     now_ms = int(datetime.now(UTC).timestamp() * 1000)
     errors = []
 
@@ -175,10 +176,13 @@ def fetch_market(limit_4h: int = 500, limit_1d: int = 400, limit_1w: int = 200) 
         d1 = _fetch_binance("1d", limit_1d, now_ms)
         h4 = _fetch_binance("4h", limit_4h, now_ms)
         w1 = _fetch_binance("1w", limit_1w, now_ms)
-        try:
-            px = _fetch_binance_ticker()
-        except Exception:
+        if skip_ticker:
             px = (h4[-1]["close"] if h4 else d1[-1]["close"])
+        else:
+            try:
+                px = _fetch_binance_ticker()
+            except Exception:
+                px = (h4[-1]["close"] if h4 else d1[-1]["close"])
         return {"source": "binance_spot", "source_note": "幣安現貨 api.binance.com /api/v3/klines",
                 "klines": {"4h": h4, "1d": d1, "1w": w1}, "price": px, "errors": errors}
     except Exception as e:
@@ -1339,10 +1343,27 @@ def render_report_slim(now: datetime, market: dict, rng: dict, check: dict, ma_d
 # ---------------------------------------------------------------------------
 # 主流程
 # ---------------------------------------------------------------------------
-def run(out_dir: Path, force_recompute: bool = False, seed: bool = False, market: dict | None = None) -> dict:
+def parse_when(s: str | None) -> datetime:
+    """解析發布標題時間（台北時間 YYYY-MM-DD HH:MM）。"""
+    if not s:
+        return datetime.now(TAIPEI)
+    raw = str(s).strip().replace("T", " ")
+    # allow "2026.11.17 10:19" or "2026-11-17 10:19"
+    raw = raw.replace(".", "-", 2) if raw[:4].isdigit() and "." in raw[:10] else raw
+    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S"):
+        try:
+            dt = datetime.strptime(raw[:19] if fmt.endswith("%S") else raw[:16], fmt)
+            return dt.replace(tzinfo=TAIPEI)
+        except ValueError:
+            continue
+    raise ValueError(f"無法解析 --when：{s}")
+
+
+def run(out_dir: Path, force_recompute: bool = False, seed: bool = False, market: dict | None = None,
+        price: float | None = None, when: str | None = None) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     state_path = out_dir / "short_model_state.json"
-    now = datetime.now(TAIPEI)
+    now = parse_when(when)
 
     if seed or not state_path.exists():
         state = init_state()
@@ -1350,7 +1371,11 @@ def run(out_dir: Path, force_recompute: bool = False, seed: bool = False, market
         state = json.loads(state_path.read_text())
 
     if market is None:
-        market = fetch_market()
+        market = fetch_market(skip_ticker=price is not None)
+    if price is not None:
+        market = dict(market)
+        market["price"] = float(price)
+        market["price_override"] = True
     ma_d = ma120_view(market["klines"]["1d"])
     ma_w = ma120_view(market["klines"]["1w"])
     macd_d = macd_view(market["klines"]["1d"])
@@ -1504,10 +1529,19 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--forecast-short", action="store_true", help="只把【短線】段印到 stdout，供 publish 使用")
     p.add_argument("--levels", action="store_true", help="只把 levels JSON 印到 stdout，供 publish 使用")
     p.add_argument("--demo-states", metavar="DIR", help="用假資料輸出六種狀態樣稿並做數字自檢，不抓盤")
+    p.add_argument("--price", type=float, default=None, help="沿用發布標題現價，不再自己抓 ticker")
+    p.add_argument("--when", default=None, help="台北時間 YYYY-MM-DD HH:MM，沿用發布標題時間")
     args = p.parse_args(argv)
     if args.demo_states:
         return demo_states(Path(args.demo_states))
-    payload = run(Path(args.out), force_recompute=args.force_recompute, seed=args.seed)
+    price = args.price
+    when = args.when
+    if price is None and os.environ.get("BTC_SPOT_PRICE"):
+        price = float(os.environ["BTC_SPOT_PRICE"].replace(",", ""))
+    if not when and os.environ.get("BTC_SPOT_WHEN"):
+        when = os.environ["BTC_SPOT_WHEN"]
+    payload = run(Path(args.out), force_recompute=args.force_recompute, seed=args.seed,
+                  price=price, when=when)
     chk = payload["check"]
     status = (f"來源 {payload['kline_source']}  現價 {payload['price']:.1f}  "
               f"脫離={chk['departed']}  重算={payload['recomputed']}  "
