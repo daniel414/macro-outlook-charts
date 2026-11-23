@@ -21,16 +21,26 @@ def H():
     t = os.environ.get("MEDIA_REPO_TOKEN") or os.environ["GH_CHARTS_TOKEN"]
     return {"Authorization": "Bearer " + t, "Accept": "application/vnd.github+json"}
 
+def _api_err(kind, r):
+    # 只留狀態與短訊息，避免把回應裡可能出現的敏感內容整段印出
+    try:
+        msg = r.json().get("message") or ""
+    except Exception:
+        msg = (r.text or "").strip().splitlines()[0] if r.text else ""
+    msg = "".join(ch for ch in msg[:180] if ch.isprintable())
+    return f"{kind} {r.status_code}" + (f": {msg}" if msg else "")
+
 def gh_put(path, data, msg):
     g = requests.get(API + path, headers=H(), timeout=60)
     body = {"message": msg, "content": base64.b64encode(data).decode(), "branch": "main"}
     if g.status_code == 200: body["sha"] = g.json()["sha"]
-    elif g.status_code != 404: raise Exception(f"gh get {g.status_code}")
+    elif g.status_code != 404: raise Exception(_api_err("gh get", g))
+    r = None
     for _ in range(3):
         r = requests.put(API + path, headers=H(), json=body, timeout=120)
         if r.status_code in (200, 201): return r.json()["commit"]["sha"]
         time.sleep(3)
-    raise Exception(f"gh put {r.status_code}")
+    raise Exception(_api_err("gh put", r))
 def pinned(sha, path):
     # 私有 repo：用 Contents API 驗證，寫入 raw sha 網址（Worker 會改寫成簽名 /img/ 網址）。
     raw = f"https://raw.githubusercontent.com/{GHR}/{sha}/{path}"

@@ -25,12 +25,8 @@ AV_Z = [("AVm2", "#2dd4bf", "極度便宜"), ("AVm15", "#26a69a", "很便宜"), 
 ONCHAIN_PAD_X, ONCHAIN_PAD_Y = 135, 741
 
 def load_hodl():
-    d = None
-    for src in ("site", "local"):
-        try:
-            d = requests.get(S0.SITE_URL + "bv-hodl-waves.json", timeout=40).json() if src == "site" else json.load(open(S0.SITE_LOCAL + "bv-hodl-waves.json"))
-            break
-        except Exception as e: print("hodl", src, e, file=sys.stderr)
+    d, tag, last = S0.load_site_json("bv-hodl-waves")
+    print("hodl source", tag, last, file=sys.stderr)
     idx = pd.to_datetime(d["t"])
     return pd.DataFrame({k: d["bands"][k] for k in d["order"]}, index=idx).astype(float)
 

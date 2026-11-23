@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """/btccheckonchain 自有圖樣稿（只產樣稿，不推播、不上傳、不改正式檔）。
-資料：只讀自家網站鏈上頁的公開資料檔（優先讀線上 /data/*.json，失敗或較舊時讀本機 4dan-site 副本）。
+資料：只讀自家網站鏈上頁的公開資料檔（優先讀線上 /data/*.json，失敗或較舊時讀本機 4dan-site 副本；GitHub Actions 再退回讀 4dan-actions-trial 裡同一批已提交的資料檔）。
 不 import publish_btc.py / short_model.py / midlong_model.py；總經數字以子程序執行 midlong_model.py 到暫存目錄取得。
 用法：onchain_selfchart.py --draft [--date 20261117]
 """
-import argparse, json, os, re, subprocess, sys, tempfile
+import argparse, json, os, re, subprocess, sys, tempfile, time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import numpy as np, pandas as pd, requests
@@ -14,6 +14,9 @@ HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
 SITE_URL = "https://4dan.app/data/"
 SITE_LOCAL = "/workspace/4dan-site/web/public/data/"
 CACHE = os.path.join(HERE, "selfchart_raw")
+# Actions runner 沒有 box 路徑；4dan.app 也可能擋資料中心 IP。此時改讀正式站資料在 4dan-actions-trial 的提交檔。
+DATA_REPO = "daniel414/4dan-actions-trial"
+DATA_REPO_PATH = "4dan-site/web/public/data"
 SERIES = {
     "P": "btc-daily", "STHRP": "bv-sth-realized", "LTHRP": "bv-lth-realized", "RP": "bv-realized", "TMM": "bv-tmm",
     "BBhot": "bv-sth-mvrv-bb-px-overheated", "BBheat": "bv-sth-mvrv-bb-px-heated", "BBcool": "bv-sth-mvrv-bb-px-cooled",
@@ -37,18 +40,85 @@ def lth_mvrv_logz(s):
     x = np.log(s); e = x.expanding(min_periods=LTHZ_MIN)
     return ((x - e.mean()) / e.std(ddof=0)).dropna()
 
+def _last_time(obj):
+    if not obj:
+        return ""
+    pts = obj.get("points")
+    if pts:
+        return pts[-1].get("time") or ""
+    t = obj.get("t")
+    if t:
+        return t[-1]
+    return ""
+
+def _local_dirs():
+    dirs, seen = [], set()
+    for d in (os.environ.get("ONCHAIN_DATA_DIR"), SITE_LOCAL, os.path.join(HERE, "site_data"), CACHE):
+        if d:
+            p = os.path.abspath(d)
+            if p not in seen:
+                seen.add(p); dirs.append(p)
+    return dirs
+
+def _auth_tokens():
+    seen = set()
+    for key in ("MEDIA_REPO_TOKEN", "GH_CHARTS_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"):
+        tok = os.environ.get(key) or ""
+        if tok and tok not in seen:
+            seen.add(tok)
+            yield key, tok
+
+def load_site_json(stem):
+    """讀 stem.json，回傳 (obj, tag, last_time)。來源：本機目錄、4dan.app、再來是資料 repo。不印 token。"""
+    name = stem + ".json"
+    cands = []
+    for d in _local_dirs():
+        path = os.path.join(d, name)
+        try:
+            obj = json.load(open(path))
+            cands.append((_last_time(obj), "local", obj))
+        except FileNotFoundError:
+            if d != CACHE:
+                print("local miss", stem, path, file=sys.stderr)
+        except Exception as e:
+            print("local miss", stem, e, file=sys.stderr)
+    try:
+        r = None
+        for i in range(2):
+            r = requests.get(SITE_URL + name, timeout=40, headers={"User-Agent": "4dan-fallback-onchain/1.0"})
+            if r.status_code == 200:
+                obj = r.json(); cands.append((_last_time(obj), "site", obj)); break
+            print("remote miss", stem, "HTTP", r.status_code, file=sys.stderr)
+            if r.status_code in (429, 500, 502, 503, 504) and i == 0:
+                time.sleep(2); continue
+            break
+    except Exception as e:
+        print("remote miss", stem, e, file=sys.stderr)
+    repo = os.environ.get("ONCHAIN_DATA_REPO") or DATA_REPO
+    rpath = (os.environ.get("ONCHAIN_DATA_REPO_PATH") or DATA_REPO_PATH).strip("/")
+    url = f"https://api.github.com/repos/{repo}/contents/{rpath}/{name}"
+    for key, tok in _auth_tokens():
+        try:
+            r = requests.get(url, timeout=60, headers={
+                "Authorization": "Bearer " + tok,
+                "Accept": "application/vnd.github.raw+json",
+                "User-Agent": "4dan-fallback-onchain/1.0",
+            })
+            if r.status_code == 200:
+                obj = r.json(); cands.append((_last_time(obj), "repo", obj)); break
+            print("repo miss", stem, key, "HTTP", r.status_code, file=sys.stderr)
+        except Exception as e:
+            print("repo miss", stem, e, file=sys.stderr)
+    if not cands:
+        raise RuntimeError("no data " + stem)
+    last, tag, obj = max(cands, key=lambda x: x[0] or "")
+    return obj, tag, last
+
 def load_one(stem):
-    pts_l = pts_r = None
-    try:
-        pts_l = json.load(open(SITE_LOCAL + stem + ".json"))["points"]
-    except Exception as e: print("local miss", stem, e, file=sys.stderr)
-    try:
-        r = requests.get(SITE_URL + stem + ".json", timeout=40, headers={"User-Agent": "btc-analyst-onchain-draft"})
-        if r.status_code == 200: pts_r = r.json()["points"]
-    except Exception as e: print("remote miss", stem, e, file=sys.stderr)
-    cands = [(p[-1]["time"], tag, p) for tag, p in (("site", pts_r), ("local", pts_l)) if p]
-    if not cands: raise RuntimeError("no data " + stem)
-    last, tag, pts = max(cands, key=lambda x: x[0])
+    obj, tag, last = load_site_json(stem)
+    pts = obj.get("points")
+    if not pts:
+        raise RuntimeError("no data " + stem)
     os.makedirs(CACHE, exist_ok=True); json.dump({"points": pts}, open(os.path.join(CACHE, stem + ".json"), "w"))
     s = pd.Series({pd.Timestamp(p["time"]): p["value"] for p in pts if p.get("value") is not None}, dtype=float).sort_index()
     return s, tag, last
