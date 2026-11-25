@@ -205,13 +205,21 @@ def kol_text_slim(m):
         raise RuntimeError("kol slim text blocked: " + "; ".join(m["banned_hits"][:5]))
     ts = datetime.strptime(m["updated_at"], "%Y-%m-%d %H:%M")
     px = ""
-    try:
+    try:   # fresh positioning snapshot (< 2h) first
         pf = os.path.join(HERE, "out/posgrid_now.json")
         if time.time() - os.path.getmtime(pf) < 7200:
             b = json.load(open(pf)).get("btc")
             if b: px = f"｜BTC {b:,.0f}"
     except Exception:
         px = ""
+    if not px:   # otherwise one Chainlink read (run as a script; ok only if updatedAt <= 2h)
+        try:
+            r = subprocess.run([sys.executable, os.path.join(HERE, "chainlink_price.py")], cwd=HERE, capture_output=True, text=True, timeout=60)
+            c = json.loads(r.stdout.strip().splitlines()[-1])
+            if c.get("ok") and c.get("price"): px = f"｜BTC {c['price']:,.0f}"
+            else: print("kol price skipped:", c.get("reason"), file=sys.stderr)
+        except Exception as e:
+            print("kol price skipped:", type(e).__name__, file=sys.stderr)
     c = m["counts"]
     L = ["BTC 分析師觀點", f"{ts:%Y.%m.%d} 台北時間 {ts:%H:%M}{px}", "", KOL_DIV, "【整體立場】",
          f"・看多 {c['偏多']}｜中性 {c['中性']}｜看空 {c['偏空']}，本期 {m['n_talk']} 位談到 BTC"]
