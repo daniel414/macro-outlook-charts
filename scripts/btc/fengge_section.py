@@ -7,13 +7,40 @@ Rules: 1) trend filter = price vs 50-week MA + daily swing structure (HH/HL or L
 Free public data: OKX BTC-USDT candles (1Wutc/1Dutc/4H/1H). Stdlib only.
 Usage: fengge_section.py [--price 80780] [--json]  -> prints the section, or nothing on failure (exit 0)."""
 import json, os, re, sys, urllib.request
+
+def _lic(key, env):
+    """授權開關（2026-11-26）：btc_summary.json 的 omit_okx／omit_cq，預設關；環境變數 BTC_OMIT_OKX／BTC_OMIT_CQ 可暫時覆蓋。"""
+    v = os.environ.get(env)
+    if v not in (None, ""): return v.strip().lower() in ("1", "true", "yes", "on")
+    _d = os.path.dirname(os.path.abspath(__file__))
+    for p in (os.path.join(_d, "btc_summary.json"), os.path.join(os.path.dirname(_d), "btc_summary.json")):
+        try:
+            if os.path.isfile(p): return bool(json.load(open(p, encoding="utf-8")).get(key, False))
+        except Exception: continue
+    return False
 _CACHE = {}
 TITLE = "【交易模型】"
 UA = {"User-Agent": "btc-fengge/1.0"}
 B = "https://www.okx.com/api/v5/market/"
 def _get(u, t=10): return json.load(urllib.request.urlopen(urllib.request.Request(u, headers=UA), timeout=t))
+BN_IV = {"1Wutc": "1w", "1Dutc": "1d", "4H": "4h", "1H": "1h"}
+def bars_bn(bar, n):
+    """omit_okx：同格式改抓幣安現貨 K 線（api.binance.com，失敗改 data-api.binance.vision；非 fapi）。"""
+    import time as _t
+    for host in ("https://api.binance.com", "https://data-api.binance.vision"):
+        try:
+            d = _get(f"{host}/api/v3/klines?symbol=BTCUSDT&interval={BN_IV[bar]}&limit={min(n + 1, 1000)}")
+            now = _t.time() * 1000
+            rows = [(int(r[0]), *map(float, r[1:5]), int(r[6])) for r in d]
+            closed = [r[:5] for r in rows if r[5] < now]
+            live = rows[-1][:5] if rows and rows[-1][5] >= now else None
+            return closed[-n:], live
+        except Exception:
+            continue
+    raise RuntimeError("binance spot klines unavailable")
 def bars(bar, n):
     """Closed bars oldest->newest as (ts,o,h,l,c), plus the live bar (or None)."""
+    if _lic("omit_okx", "BTC_OMIT_OKX"): return bars_bn(bar, n)
     out, after = [], ""
     while len(out) < n + 1:
         d = _get(f"{B}{'history-candles' if after else 'candles'}?instId=BTC-USDT&bar={bar}&limit=100{after}")["data"]
@@ -166,7 +193,7 @@ def big_trend(r, w, d):
     if tmm:
         add("tmm", 1 if px > tmm else -1, f"鏈上市場均價 {n0(tmm)} {'上方' if px > tmm else '下方'}")
     if olv.get("cycle"): it.append(("cycle", 0, "鏈上週期：" + olv["cycle"]))
-    cq = ((_rd("out/cq_consensus.json") or {}).get("consensus")) or {}
+    cq = {} if _lic("omit_cq", "BTC_OMIT_CQ") else (((_rd("out/cq_consensus.json") or {}).get("consensus")) or {})
     z = cq.get("z_score")
     if z is not None:
         v = -1 if z >= 0.8 else 1 if z <= -1.5 else 0

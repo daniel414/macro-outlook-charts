@@ -33,6 +33,16 @@ ROOT = HERE.parent if HERE.name == "scripts" else HERE
 DEFAULT_OUT = ROOT / "out" / "midlong"
 
 BINANCE_SPOT = "https://api.binance.com/api/v3"
+def _lic(key, env):
+    """授權開關（2026-11-26）：btc_summary.json 的 omit_okx／omit_cq，預設關；環境變數 BTC_OMIT_OKX／BTC_OMIT_CQ 可暫時覆蓋。"""
+    v = os.environ.get(env)
+    if v not in (None, ""): return v.strip().lower() in ("1", "true", "yes", "on")
+    _d = os.path.dirname(os.path.abspath(__file__))
+    for p in (os.path.join(_d, "btc_summary.json"), os.path.join(os.path.dirname(_d), "btc_summary.json")):
+        try:
+            if os.path.isfile(p): return bool(json.load(open(p, encoding="utf-8")).get(key, False))
+        except Exception: continue
+    return False
 OKX_CANDLES = "https://www.okx.com/api/v5/market/history-candles"
 BITSTAMP_OHLC = "https://www.bitstamp.net/api/v2/ohlc/btcusd/"
 UA = {"User-Agent": "btc-midlong-model/1.0"}
@@ -233,6 +243,7 @@ def fetch_market(limit_1d=1000, limit_1w=500, limit_1m=200) -> dict:
     except Exception as e:
         errors.append(f"binance: {type(e).__name__}: {e}")
     try:
+        if _lic("omit_okx", "BTC_OMIT_OKX"): raise RuntimeError("omit_okx")
         d1 = _fetch_okx("1d", limit_1d, now_ms)
         w1 = _fetch_okx("1w", limit_1w, now_ms)
         try:

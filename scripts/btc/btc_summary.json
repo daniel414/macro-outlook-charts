@@ -7,5 +7,8 @@
   "omit_price_source_text": true,
   "omit_jiedu": true,
   "collect_bitfinex": false,
-  "note": "Daniel／Manager 2026-11-17：持倉摘要刪散戶／Bitfinex／分析師共識／【Binance】／【技術結構】／解讀行／現價來源字樣；posdata 預設不停抓 Bitfinex（檔案保留，POSDATA_BITFINEX=1 可手動）。此檔不含金鑰。"
+  "note": "Daniel／Manager 2026-11-17：持倉摘要刪散戶／Bitfinex／分析師共識／【Binance】／【技術結構】／解讀行／現價來源字樣；posdata 預設不停抓 Bitfinex（檔案保留，POSDATA_BITFINEX=1 可手動）。此檔不含金鑰。",
+  "omit_okx": true,
+  "omit_cq": true,
+  "note_license": "2026-11-26 Daniel 決定、Manager 核准：omit_okx 拿掉 OKX 衍生品圖與數字並停收 OKX；omit_cq 拿掉 CryptoQuant。"
 }

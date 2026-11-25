@@ -28,6 +28,14 @@ AI_CARRY_H = 3
 SOURCE = "github-actions-fallback"
 OUT = os.path.join(HERE, "out", "fallback")
 
+def _lic(key, env):
+    """授權開關（2026-11-26）：btc_summary.json 的 omit_okx／omit_cq，預設關；環境變數 BTC_OMIT_OKX／BTC_OMIT_CQ 可暫時覆蓋。"""
+    v = os.environ.get(env)
+    if v not in (None, ""): return v.strip().lower() in ("1", "true", "yes", "on")
+    try: return bool(json.load(open(os.path.join(HERE, "btc_summary.json"), encoding="utf-8")).get(key, False))
+    except Exception: return False
+NO_OKX = _lic("omit_okx", "BTC_OMIT_OKX")
+
 
 def log(*a): print(*a, file=sys.stderr, flush=True)
 
@@ -83,7 +91,7 @@ def bootstrap():
     shutil.copy(os.path.join(HERE, "seed", "macro.db"), os.path.join(data, "macro.db"))                # FRED CBBTCUSD + blockchain.info (static history)
     import posdata as PD
     con = PD.db(); now = int(time.time()); fails = []
-    jobs = [("okx", lambda: okx_recent(con, {"1H": 1, "4H": 2, "1D": 1})),
+    jobs = ([] if NO_OKX else [("okx", lambda: okx_recent(con, {"1H": 1, "4H": 2, "1D": 1}))]) + [
             ("gate", lambda: PD.gate(con, True)),
             ("bitget", lambda: PD.bitget(con)),           # 【多空比】 Bitget 1H + OI snapshot (exchange order by OI)
             ("kraken", lambda: PD.kraken_daily(con)),
@@ -96,10 +104,11 @@ def bootstrap():
         except Exception as e:
             fails.append(k); log(f"bootstrap {k} FAILED: {e!r}")
             if k == "binance_www": log("bootstrap binance_www FALLBACK: using data.binance.vision daily dumps only (1-2 day lag); /btc shows 截至")
-    from btcsent import positioning as BP
-    t = time.time()
-    try: log(f"bootstrap okx funding/positioning: {BP.update(BP.pos_con())} rows in {time.time()-t:.1f}s")
-    except Exception as e: fails.append("okx_funding"); log(f"bootstrap okx funding FAILED: {e!r}")
+    if not NO_OKX:
+        from btcsent import positioning as BP
+        t = time.time()
+        try: log(f"bootstrap okx funding/positioning: {BP.update(BP.pos_con())} rows in {time.time()-t:.1f}s")
+        except Exception as e: fails.append("okx_funding"); log(f"bootstrap okx funding FAILED: {e!r}")
     return fails
 
 
@@ -123,6 +132,16 @@ def summary(j, when, ai):
     w = g("巨鯨散戶差_okx_4H")
     whale = f"・巨鯨散戶差：OKX {f1(w, 2)}（數字越負，大戶比散戶越偏空）" if w is not None else "・巨鯨散戶差：OKX -"
     L = ["BTC 持倉數據", f"{when.strftime('%Y.%m.%d %H:%M')} (UTC+8)｜{px}"]
+    if NO_OKX:   # 授權移除 OKX：只放 Gate；【大戶】由 add_rvw 同款 ls_section 補齊
+        L = ["BTC 持倉數據", f"{when.strftime('%Y.%m.%d')} 台北時間 {when.strftime('%H:%M')}｜{px}"]
+        L += sec("【大戶】", f"・大戶持倉：Gate {pct(g('多空差值_gate_大戶持倉'))}", f"・大戶帳戶：Gate {pct(g('多空差值_gate_大戶帳戶'))}",
+                 "・定義：Binance 保證金前 20%；Gate/Bitget 未公開。")
+        L += sec("【未平倉量】", "・" + "｜".join(([f"Binance {busd(g('binance_未平倉_usd'))}"] if g("binance_未平倉_usd") is not None else []) + [f"Gate {busd(g('未平倉_gate_usd'))}"]))
+        if g("資金費率_gate_pct") is not None: L += sec("【資金費率】", f"・Gate 每 8h {pct(g('資金費率_gate_pct'),4)}")
+        ah = g("ahr999")
+        zone = "" if ah is None else ("｜抄底區（<0.45）" if ah < 0.45 else "｜定投區（0.45–1.2）" if ah <= 1.2 else "｜高於定投線（>1.2）")
+        L += sec("【Ahr999】", f"・{f1(ah,2,False)}{zone}")
+        return P.add_notes(P.strip_hl(P.add_rvw(P.EMOJI.sub("", "\n".join(L))[:4900])))
     blk = ["【散戶 vs 大戶】", ai.get("散戶", "散戶"),
            f"・全體帳戶：OKX {pct(g('多空差值_全部_okx'))}｜Gate {pct(g('多空差值_全部_gate'))}", "",
            ai.get("大戶", "大戶"),
@@ -189,7 +208,7 @@ def main():
         elif line.strip().endswith(".png"): png = line.strip()
     if not j or not png: log(out.stderr[-3000:]); sys.exit("positioning_grid.py failed")
     log("grid fails:", j.get("fails"), "bootstrap fails:", fails)
-    if fails and any(k in fails for k in ("okx", "gate")): sys.exit(f"core sources failed: {fails} (not publishing)")
+    if fails and any(k in fails for k in (("gate",) if NO_OKX else ("okx", "gate"))): sys.exit(f"core sources failed: {fails} (not publishing)")
     with open(os.path.join(HERE, "out", "posgrid_now.json"), "w") as fh: json.dump(j, fh, ensure_ascii=False)
 
     mt = re.search(r"(\d{8})_(\d{4,6})", os.path.basename(png))

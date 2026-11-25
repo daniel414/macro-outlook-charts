@@ -2,6 +2,18 @@
 """Print the 【多空比】 section (version B) from data/positioning2.db latest values. Run as a script.
 Rows older than MAXAGE are shown as 無資料. Ratios: raw (多 x%), x = r/(1+r)."""
 import os, sqlite3, time, unicodedata as u
+import json
+
+def _lic(key, env):
+    """授權開關（2026-11-26）：btc_summary.json 的 omit_okx／omit_cq，預設關；環境變數 BTC_OMIT_OKX／BTC_OMIT_CQ 可暫時覆蓋。"""
+    v = os.environ.get(env)
+    if v not in (None, ""): return v.strip().lower() in ("1", "true", "yes", "on")
+    _d = os.path.dirname(os.path.abspath(__file__))
+    for p in (os.path.join(_d, "btc_summary.json"), os.path.join(os.path.dirname(_d), "btc_summary.json")):
+        try:
+            if os.path.isfile(p): return bool(json.load(open(p, encoding="utf-8")).get(key, False))
+        except Exception: continue
+    return False
 from datetime import datetime
 HERE = os.path.dirname(os.path.abspath(__file__))
 MAXAGE = 3 * 3600
@@ -16,7 +28,9 @@ def p(s, n): return s + " " * max(1, n - w(s))
 def f(v): return "無資料" if v is None else f"{v:.2f}（多 {v/(1+v)*100:.0f}%）"
 T = lambda ts: datetime.fromtimestamp(ts).strftime("%m/%d %H:%M")
 rows = []; t1h = None
+NO_OKX = _lic("omit_okx", "BTC_OMIT_OKX")
 for s, n in [("okx", "OKX"), ("gate", "Gate"), ("bitget", "Bitget")]:
+    if NO_OKX and s == "okx": continue
     v = [g(s, m, "1H") for m in ("ls_account", "top_ls_account", "top_ls_position")]
     for x in v:
         if x: t1h = max(t1h or 0, x[0])
@@ -28,7 +42,7 @@ bn = bc[0] and (bc[0][0], *[x[1] if x and bc[0][0] - x[0] <= BN_FRESH else None 
 bfresh = bool(bn) and now - bn[0] <= BN_FRESH   # live www.binance.com rows; older = fell back to daily dumps
 rows.append(("Binance" if bfresh or not bn else "Binance*", *(bn[1:] if bn else (None,) * 3)))
 # order by latest BTC perp OI (USD), all must be <= MAXAGE, else fixed fallback order
-FIXED = ["Binance", "OKX", "Bitget", "Gate"]
+FIXED = ["Binance", "Bitget", "Gate"] if NO_OKX else ["Binance", "OKX", "Bitget", "Gate"]
 def oi(src):
     r = c.execute("select ts,value from series where src=? and metric='oi_usd' order by ts desc limit 1", (src,)).fetchone()
     return r if r and now - r[0] <= MAXAGE else None
@@ -36,6 +50,7 @@ bo = c.execute("select ts,coalesce(oi_usd, oi_btc*?) from binance where oi_usd i
                (float(os.environ.get("BTC_PX", "0")) or None,)).fetchone()
 OI = {"OKX": oi("okx"), "Gate": oi("gate"), "Bitget": oi("bitget"),
       "Binance": bo if bo and bo[1] and now - bo[0] <= MAXAGE else None}
+if NO_OKX: OI.pop("OKX")
 if os.environ.get("LS_TEST_DROP_OI"): OI[os.environ["LS_TEST_DROP_OI"]] = None
 key = lambda r: r[0].rstrip("*")
 if all(OI.values()): rows.sort(key=lambda r: -OI[key(r)][1]); ORDER = "oi"
@@ -55,7 +70,7 @@ if "--rvw" in sys.argv:
     gap = [f"{r[0]} {r[3] - r[1]:+.2f}" for r in rows if key(r) in ("Binance", "OKX") and r[1] is not None and r[3] is not None]
     if gap: out.append("・巨鯨散戶差：" + "｜".join(gap))
     print("\n".join(x for x in out if x)); sys.exit(0)
-L = ["【多空比】" + (T(t1h) if t1h else ""), "OKX/Gate/Bitget 1H、Binance 5m"]
+L = ["【多空比】" + (T(t1h) if t1h else ""), ("Gate/Bitget 1H、Binance 5m" if NO_OKX else "OKX/Gate/Bitget 1H、Binance 5m")]
 NM = {"OKX": "OKX　　", "Gate": "Gate　 ", "Bitget": "Bitget　", "Binance": "Binance ", "Binance*": "Binance*"}
 def blk(title, i, note=None):
     out = ["", title] + ([note] if note else [])
@@ -68,6 +83,6 @@ L.append("")
 if not bn: L.append("*Binance 無資料")
 elif not bfresh: L.append(f"*Binance 截至 {T(bn[0])}（改用官方每日檔）")
 L.append("大戶：Binance 保證金前 20%")
-L.append("OKX 持倉前 5%；Gate/Bitget 未公開")
+L.append("Gate/Bitget 未公開" if NO_OKX else "OKX 持倉前 5%；Gate/Bitget 未公開")
 L.append(">1 偏多／<1 偏空")
 print("\n".join(L))

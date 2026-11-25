@@ -52,6 +52,20 @@ TH = dict(
 )
 
 
+import json as _json_lic, os as _os_lic
+
+def _lic(key, env):
+    """授權開關（2026-11-26）：btc_summary.json 的 omit_okx／omit_cq，預設關；環境變數 BTC_OMIT_OKX／BTC_OMIT_CQ 可暫時覆蓋。"""
+    v = _os_lic.environ.get(env)
+    if v not in (None, ""): return v.strip().lower() in ("1", "true", "yes", "on")
+    _d = _os_lic.path.dirname(_os_lic.path.abspath(__file__))
+    for p in (_os_lic.path.join(_d, "btc_summary.json"), _os_lic.path.join(_os_lic.path.dirname(_d), "btc_summary.json")):
+        try:
+            if _os_lic.path.isfile(p): return bool(_json_lic.load(open(p, encoding="utf-8")).get(key, False))
+        except Exception: continue
+    return False
+NO_OKX = _lic("omit_okx", "BTC_OMIT_OKX")
+
 def _get(url: str, timeout: int = 25) -> Any:
     req = urllib.request.Request(url, headers=UA)
     with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -405,10 +419,10 @@ def fetch_oi_venues(hours: int = 240) -> tuple[dict[str, list[dict]], dict]:
     out: dict[str, list[dict]] = {}
     meta: dict = {}
 
-    # OKX paginate
+    # OKX paginate（omit_okx 開時整段跳過）
     okx_by: dict[int, float] = {}
     now_ms = int(time.time() * 1000)
-    for i in range(max(3, hours // 90 + 2)):
+    for i in range(0 if NO_OKX else max(3, hours // 90 + 2)):
         end_ms = now_ms - i * 100 * 3600 * 1000
         begin_ms = end_ms - 100 * 3600 * 1000
         d = _get(
@@ -420,9 +434,10 @@ def fetch_oi_venues(hours: int = 240) -> tuple[dict[str, list[dict]], dict]:
         time.sleep(0.1)
         if len(okx_by) >= hours:
             break
-    out["okx"] = [{"ts": k, "usd": okx_by[k]} for k in sorted(okx_by)][-hours:]
-    meta["okx"] = {"n": len(out["okx"]), "start_ts": out["okx"][0]["ts"] if out["okx"] else None,
-                   "end_ts": out["okx"][-1]["ts"] if out["okx"] else None, "source": "OKX OI history"}
+    if not NO_OKX:
+        out["okx"] = [{"ts": k, "usd": okx_by[k]} for k in sorted(okx_by)][-hours:]
+        meta["okx"] = {"n": len(out["okx"]), "start_ts": out["okx"][0]["ts"] if out["okx"] else None,
+                       "end_ts": out["okx"][-1]["ts"] if out["okx"] else None, "source": "OKX OI history"}
 
     gate = _get(
         f"https://api.gateio.ws/api/v4/futures/usdt/contract_stats?contract=BTC_USDT&interval=1h&limit={min(max(hours, 240), 300)}"
@@ -563,13 +578,14 @@ def fetch_funding_oi_weighted(oi_maps: dict[str, dict[int, float]], n: int = 60)
     funds: dict[str, list[dict]] = {}
     meta = {}
 
-    okx = _get("https://www.okx.com/api/v5/public/funding-rate-history?instId=BTC-USDT-SWAP&limit=100")
-    funds["okx"] = sorted(
-        [{"ts": int(r["fundingTime"]) // 1000, "rate": float(r.get("realizedRate") or r["fundingRate"])}
-         for r in okx["data"]],
-        key=lambda x: x["ts"],
-    )
-    meta["okx"] = {"n": len(funds["okx"])}
+    if not NO_OKX:
+        okx = _get("https://www.okx.com/api/v5/public/funding-rate-history?instId=BTC-USDT-SWAP&limit=100")
+        funds["okx"] = sorted(
+            [{"ts": int(r["fundingTime"]) // 1000, "rate": float(r.get("realizedRate") or r["fundingRate"])}
+             for r in okx["data"]],
+            key=lambda x: x["ts"],
+        )
+        meta["okx"] = {"n": len(funds["okx"])}
 
     gate = _get("https://api.gateio.ws/api/v4/futures/usdt/funding_rate?contract=BTC_USDT&limit=100")
     funds["gate"] = sorted([{"ts": int(float(r["t"])), "rate": float(r["r"])} for r in gate], key=lambda x: x["ts"])

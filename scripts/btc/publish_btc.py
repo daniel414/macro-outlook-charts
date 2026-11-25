@@ -276,6 +276,7 @@ def kol_text():
         L.append(f"・{xh_name(a['handle'])}｜{lab.get(a.get('stance'), a.get('stance', '-'))}" + (f"（{a['latest_post'][5:].replace('-', '/')}）" if a.get("latest_post") else "") + (f"：{_one(a)}" if _one(a) else ""))
     if quiet: L.append("・近期未談 BTC：" + "、".join(quiet))
     try:   # CryptoQuant top-5 BTC analysts (cq_consensus.py --kol, run as a script, reads the daily cache); optional
+        if summary_opts().get("omit_cq"): raise RuntimeError("omit_cq")
         cq = subprocess.run([sys.executable, os.path.join(HERE, "cq_consensus.py"), "--kol"], cwd=HERE, capture_output=True, text=True, timeout=90).stdout.strip()
         if cq.startswith("【CryptoQuant"): L += ["", KOL_DIV] + cq.splitlines()
     except Exception as e: print("cq kol skipped:", e, file=sys.stderr)
@@ -284,7 +285,8 @@ def kol_text():
 def summary_opts():
     """Persistent switches for /btc 持倉摘要. Defaults follow the 11/17 cuts; file can flip a flag back."""
     d = {"omit_retail": True, "omit_bitfinex": True, "omit_consensus": True,
-         "omit_binance_block": True, "omit_structure": True, "omit_price_source_text": True}
+         "omit_binance_block": True, "omit_structure": True, "omit_price_source_text": True,
+         "omit_okx": False, "omit_cq": False}   # omit_okx／omit_cq：授權移除開關（2026-11-26），預設關
     path = os.path.join(HERE, "btc_summary.json")
     try:
         if os.path.isfile(path):
@@ -293,6 +295,9 @@ def summary_opts():
                 d.update({k: bool(raw[k]) for k in d if k in raw})
     except Exception as e:
         print("summary_opts:", e, file=sys.stderr)
+    for k, env in (("omit_okx", "BTC_OMIT_OKX"), ("omit_cq", "BTC_OMIT_CQ")):
+        v = os.environ.get(env)
+        if v not in (None, ""): d[k] = v.strip().lower() in ("1", "true", "yes", "on")
     return d
 
 def _drop_section(text, title_pat):
@@ -323,16 +328,22 @@ def summary(j, when):
     L += sec("【大戶】",
              "・大戶持倉：",
              "・大戶帳戶：",
-             "・定義：Binance 保證金前 20%；OKX 持倉前 5%；Gate/Bitget 未公開。")
+             "・定義：Binance 保證金前 20%；Gate/Bitget 未公開。" if summary_opts().get("omit_okx")
+             else "・定義：Binance 保證金前 20%；OKX 持倉前 5%；Gate/Bitget 未公開。")
     def oi(name, k):
         c = g(k.replace("_usd", "_24h_pct"))
         return f"{name} {busd(g(k))}" + (f" ({pct(c)} 24h)" if c is not None else "")
     oi_parts = []
     if g("binance_未平倉_usd") is not None: oi_parts.append(oi("Binance", "binance_未平倉_usd"))
-    oi_parts += [oi("Gate", "未平倉_gate_usd"), oi("OKX", "未平倉_okx_usd")]
+    no_okx = summary_opts().get("omit_okx")
+    oi_parts += [oi("Gate", "未平倉_gate_usd")] + ([] if no_okx else [oi("OKX", "未平倉_okx_usd")])
     L += sec("【未平倉量】", "・" + "｜".join(oi_parts))
-    L += sec("【資金費率】",
-             f"・每 8h：OKX {pct(g('資金費率_okx_8h_pct'),4)}｜Gate {pct(g('資金費率_gate_pct'),4)}")
+    if no_okx:
+        if g("資金費率_gate_pct") is not None:
+            L += sec("【資金費率】", f"・Gate 每 8h {pct(g('資金費率_gate_pct'),4)}")
+    else:
+        L += sec("【資金費率】",
+                 f"・每 8h：OKX {pct(g('資金費率_okx_8h_pct'),4)}｜Gate {pct(g('資金費率_gate_pct'),4)}")
     opt = summary_opts()
     if not opt.get("omit_bitfinex"):
         L += sec("【Bitfinex 槓桿】",
@@ -450,7 +461,7 @@ def add_range(text):
 def add_consensus(text):
     """Insert 【分析師共識】 (cq_consensus.py --line, run as a script; CryptoQuant σ as a contrarian gauge, cache refreshed daily)
     right before 【技術結構】 (else before 【Binance…】, else at the end). Replaced if present, so it appears once. Unchanged on failure."""
-    if summary_opts().get("omit_consensus"):
+    if summary_opts().get("omit_consensus") or summary_opts().get("omit_cq"):
         return _drop_section(text, r"【分析師共識】")
     try:
         sec = subprocess.run([sys.executable, os.path.join(HERE, "cq_consensus.py"), "--line"], cwd=HERE, capture_output=True, text=True, timeout=90).stdout.strip()

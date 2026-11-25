@@ -17,6 +17,16 @@ MAX_AGE_H = 24; HARD_MAX_H = 72
 HOT, HOT2, COLD = 0.8, 1.5, -1.5
 TW = timezone(timedelta(hours=8))
 SRC = "資料來源：CryptoQuant 公開共識頁"
+def _lic(key, env):
+    """授權開關（2026-11-26）：btc_summary.json 的 omit_okx／omit_cq，預設關；環境變數 BTC_OMIT_OKX／BTC_OMIT_CQ 可暫時覆蓋。"""
+    v = os.environ.get(env)
+    if v not in (None, ""): return v.strip().lower() in ("1", "true", "yes", "on")
+    _d = os.path.dirname(os.path.abspath(__file__))
+    for p in (os.path.join(_d, "btc_summary.json"), os.path.join(os.path.dirname(_d), "btc_summary.json")):
+        try:
+            if os.path.isfile(p): return bool(json.load(open(p, encoding="utf-8")).get(key, False))
+        except Exception: continue
+    return False
 def get(url, js=True):
     r = urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 btc-sentiment"}), timeout=30).read().decode()
     return json.loads(r) if js else r
@@ -108,6 +118,8 @@ def kol():
         L.append(f"・{a['handle']}｜CQ 分數 {a.get('score')}｜{s}（{dt}）｜{v}")
     return "\n".join(L)
 if __name__ == "__main__":
+    if _lic("omit_cq", "BTC_OMIT_CQ"):
+        print("cq_consensus: omit_cq on, skipped", file=sys.stderr); sys.exit(0)
     if "--fetch" in sys.argv: print(json.dumps(fetch(), ensure_ascii=False)[:400])
     elif "--kol" in sys.argv: print(kol())
     else: print(line())

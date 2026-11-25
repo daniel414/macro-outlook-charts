@@ -3,8 +3,18 @@ Price vs this year's / month's / week's open (UTC 00:00 daily bars, week starts 
 (mean of the last 120 completed daily closes); label 多方結構/空方結構 = latest completed daily close above/below MA120. Free public data: OKX BTC-USDT 1Dutc, fallback Coinbase BTC-USD.
 Usage: btc_structure.py [--price 81912] [--json]  -> prints the section (title line + item line), or nothing on failure.
 Standalone, stdlib only; every failure -> empty output, exit 0."""
-import json, sys, urllib.request
+import json, os, sys, urllib.request
 from datetime import datetime, timedelta, timezone
+def _lic(key, env):
+    """授權開關（2026-11-26）：btc_summary.json 的 omit_okx／omit_cq，預設關；環境變數 BTC_OMIT_OKX／BTC_OMIT_CQ 可暫時覆蓋。"""
+    v = os.environ.get(env)
+    if v not in (None, ""): return v.strip().lower() in ("1", "true", "yes", "on")
+    _d = os.path.dirname(os.path.abspath(__file__))
+    for p in (os.path.join(_d, "btc_summary.json"), os.path.join(os.path.dirname(_d), "btc_summary.json")):
+        try:
+            if os.path.isfile(p): return bool(json.load(open(p, encoding="utf-8")).get(key, False))
+        except Exception: continue
+    return False
 TITLE = "【技術結構】"
 UA = {"User-Agent": "btc-structure/1.0"}
 def _get(u, t=10):
@@ -38,7 +48,7 @@ def snapshot(price=None):
     now = datetime.now(timezone.utc); today = now.replace(hour=0, minute=0, second=0, microsecond=0)
     starts = dict(year=today.replace(month=1, day=1), month=today.replace(day=1), week=today - timedelta(days=today.weekday()))
     err = []
-    for f in (okx, coinbase):
+    for f in ((coinbase,) if _lic("omit_okx", "BTC_OMIT_OKX") else (okx, coinbase)):
         try:
             s = f(); px = float(price) if price else s["last"]
             opens = {k: s["bar_at"](d) for k, d in starts.items()}

@@ -25,6 +25,17 @@ from btcsent.positioning import load as load_okx_pos, pos_con
 ROOT = _ROOT
 PDB = os.path.join(ROOT, "data", "positioning2.db"); MDB = os.path.join(ROOT, "data", "macro.db")
 TZ = ZoneInfo("Asia/Taipei")
+
+def _lic(key, env):
+    """授權開關（2026-11-26）：btc_summary.json 的 omit_okx／omit_cq，預設關；環境變數 BTC_OMIT_OKX／BTC_OMIT_CQ 可暫時覆蓋。"""
+    v = os.environ.get(env)
+    if v not in (None, ""): return v.strip().lower() in ("1", "true", "yes", "on")
+    _d = os.path.dirname(os.path.abspath(__file__))
+    for p in (os.path.join(_d, "btc_summary.json"), os.path.join(os.path.dirname(_d), "btc_summary.json")):
+        try:
+            if os.path.isfile(p): return bool(json.load(open(p, encoding="utf-8")).get(key, False))
+        except Exception: continue
+    return False
 STEP = {"1H": 3600, "4H": 14400, "1D": 86400}
 TH = dict(bg="#0e1117", panel="#0e1117", grid="#27292f", text="#cbced3", muted="#9b9ea4", price="#dfbb68",
           a="#5d82ea", b="#26a69a", c="#5d82ea", up="#2ebd85", down="#f6465d", chip="#0e1117", title="#ffffff", red="#e34668", green="#6fbf73", white="#f3f3f3")
@@ -57,6 +68,7 @@ def gate_series(con, metric, tf, start=None, end=None):
     return h.groupby(bucket_start(h.index.to_numpy(), STEP[tf])).last().combine_first(s).sort_index()
 
 
+NO_OKX = _lic("omit_okx", "BTC_OMIT_OKX")
 STALE, ASOF = {}, {}
 FUND_OKX_MAX = 9 * 3600     # OKX settles every 8h; the last realized rate may legitimately be up to 8h old
 SNAP_MAX = 2 * 3600
@@ -72,13 +84,15 @@ def _maxts(con, src, metric, tf):
 
 def freshen(tf, fails):
     """Refresh OKX funding live every run; refetch any OI/funding source whose newest row is stale (free public APIs)."""
-    try:
-        from btcsent.positioning import update as okx_update
-        okx_update(pos_con(), max_pages=1)
-    except Exception as e:
-        fails.append(f"okx_funding_refresh: {e!r}")
+    if not NO_OKX:
+        try:
+            from btcsent.positioning import update as okx_update
+            okx_update(pos_con(), max_pages=1)
+        except Exception as e:
+            fails.append(f"okx_funding_refresh: {e!r}")
     now = time.time(); con = sqlite3.connect(PDB, timeout=60)
     checks = {"okx": [("oi_usd", tf)], "gate": [("oi_usd", tf), ("funding", tf)]}
+    if NO_OKX: checks.pop("okx")
     need = [src for src, ms in checks.items()
             if any(now - _maxts(con, src, m, t) > (SNAP_MAX if t == "snap" else tf_max(t)) for m, t in ms)]
     con.close()
@@ -280,6 +294,7 @@ def draw_leverage_stack_cell(ax):
     hours = int(days * 24)
     # v4：完整 OHLC + 合約 CVD 僅原始 taker
     try:
+        if NO_OKX: raise RuntimeError("omit_okx")
         candles, _pm = L.fetch_okx_perp_candles(hours + 5)
     except Exception:
         candles, _pm = L.fetch_bn_spot_ohlc(hours + 5)
@@ -292,19 +307,20 @@ def draw_leverage_stack_cell(ax):
         mdates.date2num(datetime.fromtimestamp(end_ts, timezone.utc)),
     )
 
-    okx_f, okx_fm = L.fetch_okx_futures_cvd(hours + 10, price_by_ts=price_by_ts)
+    okx_f, okx_fm = ([], {"kind": "excluded", "n": 0}) if NO_OKX else L.fetch_okx_futures_cvd(hours + 10, price_by_ts=price_by_ts)
     bitget_f, bitget_fm = L.fetch_bitget_futures_cvd(hours + 10, price_by_ts=price_by_ts)
-    fut, fut_meta = L.merge_delta_series([
-        ("OKX", okx_f, okx_fm), ("Bitget", bitget_f, bitget_fm),
+    fut, fut_meta = L.merge_delta_series(([] if NO_OKX else [("OKX", okx_f, okx_fm)]) + [
+        ("Bitget", bitget_f, bitget_fm),
         ("Gate", [], {"kind": "excluded_estimate", "n": 0}),
         ("Bybit", [], {"kind": "unavailable", "n": 0, "error": "無公開歷史 taker"}),
     ])
     bn_s, bn_sm = L.fetch_bn_spot_delta(hours + 10)
-    okx_s, okx_sm = L.fetch_okx_spot_delta(hours + 10, price_by_ts=price_by_ts)
+    okx_s, okx_sm = ([], {"kind": "excluded", "n": 0}) if NO_OKX else L.fetch_okx_spot_delta(hours + 10, price_by_ts=price_by_ts)
     cb_s, cb_sm = L.fetch_coinbase_spot_delta(hours + 10)
-    spot, spot_meta = L.merge_delta_series([
-        ("Binance", bn_s, bn_sm), ("OKX", okx_s, okx_sm), ("Coinbase", cb_s, cb_sm),
-    ])
+    spot, spot_meta = L.merge_delta_series([("Binance", bn_s, bn_sm)] + ([] if NO_OKX else [("OKX", okx_s, okx_sm)]) + [("Coinbase", cb_s, cb_sm)])
+    # omit_okx：合約 CVD 只剩 Bitget（API 只給約 30 根 1H），蓋不到視窗一半就不畫，避免右側只剩一小段
+    if NO_OKX and fut and (fut[-1]["ts"] - fut[0]["ts"]) < 0.5 * hours * 3600:
+        fut, fut_meta = [], {"included": [], "start_ts": spot_meta.get("start_ts"), "end_ts": spot_meta.get("end_ts")}
     oi_venues, _ = L.fetch_oi_venues(hours + 10)
     for r in oi_venues.get("bybit") or []:
         if not r.get("usd"):
@@ -411,9 +427,9 @@ def main():
 
     # 0 槓桿力道堆疊（多所合計）
     ax = axs[0]
-    o, g = S("okx", "oi_usd"), S("gate", "oi_usd")
-    vo, vg = fresh("未平倉_okx_usd", o, tf_max(a.tf)), fresh("未平倉_gate_usd", g, tf_max(a.tf))
-    cur.update({"未平倉_okx_usd": vo, "未平倉_gate_usd": vg})
+    o, g = (None if NO_OKX else S("okx", "oi_usd")), S("gate", "oi_usd")
+    vo, vg = (None if NO_OKX else fresh("未平倉_okx_usd", o, tf_max(a.tf))), fresh("未平倉_gate_usd", g, tf_max(a.tf))
+    cur.update({"未平倉_gate_usd": vg} if NO_OKX else {"未平倉_okx_usd": vo, "未平倉_gate_usd": vg})
     try:
         draw_leverage_stack_cell(ax)
     except Exception as e:
@@ -465,18 +481,22 @@ def main():
 
     # still fetch funding into JSON for compat (not drawn as own cell — in stack)
     try:
-        fo = load_okx_pos(pos_con(), "funding_realized", "8h", start_b, end_b) * 100
         fg = S("gate", "funding") * 100
-        vo, vg = fresh("資金費率_okx_8h_pct", fo, FUND_OKX_MAX), fresh("資金費率_gate_pct", fg, tf_max(a.tf))
-        cur.update({"資金費率_okx_8h_pct": vo, "資金費率_gate_pct": vg})
+        if NO_OKX:
+            cur.update({"資金費率_gate_pct": fresh("資金費率_gate_pct", fg, tf_max(a.tf))})
+        else:
+            fo = load_okx_pos(pos_con(), "funding_realized", "8h", start_b, end_b) * 100
+            vo, vg = fresh("資金費率_okx_8h_pct", fo, FUND_OKX_MAX), fresh("資金費率_gate_pct", fg, tf_max(a.tf))
+            cur.update({"資金費率_okx_8h_pct": vo, "資金費率_gate_pct": vg})
     except Exception as e:
         fails.append(f"funding json: {e!r}")
 
     # still fetch OKX/Gate 多空差值 into JSON for /btc【多空差值】compat (not drawn; layout stays 2×2)
     try:
-        o_all, g_all = lsdelta(S("okx", "ls_account")), lsdelta(S("gate", "ls_account"))
-        cur["多空差值_全部_okx"], cur["多空差值_全部_gate"] = last(o_all)[0], last(g_all)[0]
-        for src in ("okx", "gate"):
+        g_all = lsdelta(S("gate", "ls_account"))
+        if not NO_OKX: cur["多空差值_全部_okx"] = last(lsdelta(S("okx", "ls_account")))[0]
+        cur["多空差值_全部_gate"] = last(g_all)[0]
+        for src in (("gate",) if NO_OKX else ("okx", "gate")):
             tp, ta = lsdelta(S(src, "top_ls_position")), lsdelta(S(src, "top_ls_account"))
             cur[f"多空差值_{src}_大戶持倉"], cur[f"多空差值_{src}_大戶帳戶"] = last(tp)[0], last(ta)[0]
     except Exception as e:
