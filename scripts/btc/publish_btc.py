@@ -189,12 +189,58 @@ def _one(a, cap=46):
     nums = lambda t: set(re.findall(r"\d[\d,]{3,}", t))
     keys = [x for x in segs if len(x) <= 22 and not (nums(x) and nums(x) <= nums(r))][:2] if len(r) < 40 else []
     return r + ("｜關鍵 " + "；".join(keys) if keys else "")
+def kol_model():
+    """Slim content model from kol_chart.py --slim-json (run as a script). None on failure."""
+    try:
+        r = subprocess.run([os.path.join(HERE, ".venv/bin/python"), os.path.join(HERE, "kol_chart.py"), "--slim-json"],
+                           cwd=HERE, capture_output=True, text=True, timeout=60)
+        return json.loads(r.stdout) if r.returncode == 0 and r.stdout.strip() else None
+    except Exception as e:
+        print("kol model skipped:", e, file=sys.stderr); return None
+KOL_LAB = {"偏多": "看多", "偏空": "看空", "中性": "中性"}
+def kol_text_slim(m):
+    """Slim /btckol text (2026-11-25): stance tally, <=6 common levels, divergence, one line per analyst who talked BTC.
+    No 未談 list, no CryptoQuant block, no disclaimer. Same content model as the 3 images."""
+    if m.get("banned_hits"):
+        raise RuntimeError("kol slim text blocked: " + "; ".join(m["banned_hits"][:5]))
+    ts = datetime.strptime(m["updated_at"], "%Y-%m-%d %H:%M")
+    px = ""
+    try:
+        pf = os.path.join(HERE, "out/posgrid_now.json")
+        if time.time() - os.path.getmtime(pf) < 7200:
+            b = json.load(open(pf)).get("btc")
+            if b: px = f"｜BTC {b:,.0f}"
+    except Exception:
+        px = ""
+    c = m["counts"]
+    L = ["BTC 分析師觀點", f"{ts:%Y.%m.%d} 台北時間 {ts:%H:%M}{px}", "", KOL_DIV, "【整體立場】",
+         f"・看多 {c['偏多']}｜中性 {c['中性']}｜看空 {c['偏空']}，本期 {m['n_talk']} 位談到 BTC"]
+    if m.get("common_levels"):
+        L += ["", KOL_DIV, "【共同關注價位】"]
+        for x in m["common_levels"]:
+            lvl, _, note = x.partition("｜")
+            L.append("・" + kfmt(lvl).strip() + ("｜" + xh(kfmt(note)).strip() if note else ""))
+    if m.get("divergence"):
+        L += ["", KOL_DIV, "【主要分歧】", "・" + xh(kfmt(m["divergence"])).strip().rstrip("。")]
+    L += ["", KOL_DIV, "【各分析師】"]
+    for r in m["bull"] + m["bear_neutral"]:
+        body = "；".join([r["line"]] + r["points"])
+        L.append(f"・{xh_name(r['handle'])}｜{KOL_LAB.get(r['stance'], r['stance'])}：" + kfmt(body).rstrip("。"))
+    t = EMOJI.sub("", "\n".join(L))
+    if len(t) > 4900:   # never cut mid-line: drop whole analyst lines from the end
+        keep = t.splitlines()
+        while len("\n".join(keep)) > 4900: keep.pop()
+        t = "\n".join(keep)
+    return t
 def kol_text():
     """/btckol text: title+time, ━ blocks: 整體立場 / 共同關注價位 / 主要分歧 / 各分析師 (one line per analyst)."""
     try:
         d = json.load(open(os.path.join(HERE, "kol/latest_view.json"))); acc = d["accounts"]
     except Exception:
         return ""
+    m = kol_model()
+    if m and m.get("enabled"):
+        return kol_text_slim(m)
     ts = datetime.strptime(d["updated_at"][:16], "%Y-%m-%d %H:%M").strftime("%Y.%m.%d %H:%M")
     st = lambda a: "未談BTC" if _quiet(a) else a.get("stance")
     n = lambda s: sum(1 for a in acc if st(a) == s)
@@ -293,6 +339,31 @@ def summary(j, when):
     t = EMOJI.sub("", "\n".join(L))[:4900]
     assert not EMOJI.search(t)
     return t
+def publish_kol_dry(when, stamp, out_dir):
+    """--kol-only --dry-run: same render + JPEG/preview + kol_text as publish_kol, written to out_dir only.
+    No GitHub upload, no kol_latest.json change, no LINE."""
+    os.makedirs(out_dir, exist_ok=True)
+    r = subprocess.run([os.path.join(HERE, ".venv/bin/python"), os.path.join(HERE, "kol_chart.py"),
+                        "--out-prefix", os.path.join(out_dir, f"btc_kol_{stamp}")],
+                       cwd=HERE, capture_output=True, text=True, timeout=180)
+    if r.stderr: print(r.stderr.rstrip(), file=sys.stderr)
+    if r.returncode != 0:
+        raise RuntimeError(f"kol_chart exit {r.returncode}")
+    paths = [ln.strip() for ln in r.stdout.splitlines() if ln.strip().endswith(".png")]
+    imgs = []
+    for i, png in enumerate(paths, 1):
+        ki = Image.open(png).convert("RGB")
+        kb = os.path.join(out_dir, f"p{i}.jpg"); ki.save(kb, "JPEG", quality=90, optimize=True)
+        kq = ki.copy(); kq.thumbnail((1024, 1024)); kpv = os.path.join(out_dir, f"p{i}_preview.jpg"); kq.save(kpv, "JPEG", quality=85, optimize=True)
+        ph = ki.copy(); ph = ph.resize((1080, round(ki.size[1] * 1080 / ki.size[0])), Image.Resampling.LANCZOS)
+        kph = os.path.join(out_dir, f"p{i}_phone.jpg"); ph.save(kph, "JPEG", quality=88, optimize=True)
+        imgs.append({"page": i, "image": kb, "preview": kpv, "phone": kph})
+    txt = kol_text()
+    open(os.path.join(out_dir, "kol_text.txt"), "w", encoding="utf-8").write(txt)
+    k = {"date": when.strftime("%Y-%m-%d %H:%M"), "kol_text": txt, "kol_images": imgs, "dry_run": True}
+    open(os.path.join(out_dir, "kol_latest.preview.json"), "w", encoding="utf-8").write(json.dumps(k, ensure_ascii=False, indent=1))
+    print("KOL_DRY_RUN", len(imgs), out_dir, file=sys.stderr)
+    return imgs
 def publish_kol(when, stamp, require=False):
     """Analyst image(s) + btc/kol_latest.json only. Never touches btc/latest.json.
     Phone layout may yield 2 PNGs. Worker still reads kol_image_url/kol_preview_url (page 1).
@@ -726,8 +797,11 @@ def add_rvw(text):
     except Exception as e:
         print("rvw skipped:", e, file=sys.stderr); return text
 def main():
-    a = argparse.ArgumentParser(); a.add_argument("--image"); a.add_argument("--json"); a.add_argument("--text"); a.add_argument("--dry-run", action="store_true"); a.add_argument("--kol-text", action="store_true", help="print /btckol text only"); a.add_argument("--kol-only", action="store_true", help="only analyst image + btc/kol_latest.json"); a = a.parse_args()
+    a = argparse.ArgumentParser(); a.add_argument("--image"); a.add_argument("--json"); a.add_argument("--text"); a.add_argument("--dry-run", action="store_true"); a.add_argument("--kol-text", action="store_true", help="print /btckol text only"); a.add_argument("--kol-only", action="store_true", help="only analyst image + btc/kol_latest.json"); a.add_argument("--out-dir", help="with --kol-only --dry-run: local output folder"); a = a.parse_args()
     if a.kol_text: print(kol_text()); return   # print /btckol text only, no upload
+    if a.kol_only and a.dry_run:   # local trial: render + text only, no upload
+        now = datetime.now(); stamp = now.strftime("%Y%m%d_%H%M")
+        publish_kol_dry(now, stamp, a.out_dir or os.path.join(HERE, "out/kol_dry")); return
     if a.kol_only:
         now = datetime.now(); stamp = now.strftime("%Y%m%d_%H%M")
         uploaded = publish_kol(now, stamp, require=True)
