@@ -66,6 +66,7 @@ INIT_STOP = 57800.0  # 最終停損／錨定低點（7/1 低點）
 INIT_STAND_FIRM = [67000.0, 67500.0]
 INIT_RALLY_LOW = 57800.2
 INIT_RALLY_HIGH = 87395.7
+INIT_RECOMPUTE_BAR = "2026-11-16"  # 11/17 結論成立時最後一根已收完日線（台北日期）
 
 BINANCE_SPOT = "https://api.binance.com/api/v3"
 def _lic(key, env):
@@ -523,13 +524,99 @@ def init_state() -> dict:
         },
         "scenarios": init_scenarios(),
         "last_recompute_reason": None,
+        "last_recompute_bar": INIT_RECOMPUTE_BAR,
+        "overhead_levels": [],
     }
 
 
 # ---------------------------------------------------------------------------
 # 檢查邏輯
 # ---------------------------------------------------------------------------
-def stand_firm(closed_1d: list[dict], closed_4h: list[dict], zone: list[float]) -> dict:
+def bar_date(r: dict) -> str:
+    """日線的台北日期（開盤日），用來記觸發重算的那一根。"""
+    return taipei_of(r["open_time"]).strftime("%Y-%m-%d")
+
+
+def close_streak(closed_1d: list[dict], pred) -> dict:
+    """最新已收日線往回數，連續符合 pred 的那一段。
+    start＝這段的第一根；prev_close＝這段之前那一根的收盤（沒有就是 None）。"""
+    n = len(closed_1d)
+    i = n
+    while i > 0 and pred(closed_1d[i - 1]["close"]):
+        i -= 1
+    if i == n:
+        return {"on": False, "start": None, "len": 0, "prev_close": None}
+    return {
+        "on": True,
+        "start": bar_date(closed_1d[i]),
+        "len": n - i,
+        "prev_close": closed_1d[i - 1]["close"] if i > 0 else None,
+    }
+
+
+def crossed_after(streak: dict, birth: str | None, strict: bool) -> bool:
+    """這段是不是在框成立之後才從另一側收過來。
+    strict＝True（重算用）：第一根必須晚於觸發上次重算的那根，同一根不能再用。
+    strict＝False（判斷站穩用）：允許就是觸發重算的那根，但前一根必須在另一側。"""
+    if not streak["on"] or streak["prev_close"] is None:
+        return False
+    if birth is None:
+        return True
+    return streak["start"] > birth if strict else streak["start"] >= birth
+
+
+def resolve_recompute_bar(state: dict, closed_1d: list[dict]) -> str | None:
+    """觸發上次重算的那根日線。舊狀態檔沒記：用重算原因裡的收盤價對回那一根，
+    對不到就取狀態檔更新時已收完的最後一根；從沒重算過就是 11/17 結論的那根。"""
+    v = state.get("last_recompute_bar")
+    if v:
+        return v
+    reason = state.get("last_recompute_reason")
+    if not reason:
+        return INIT_RECOMPUTE_BAR
+    upd_ms = None
+    m = re.search(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2})", str(state.get("updated_at") or ""))
+    if m:
+        upd_ms = int(datetime.strptime(m.group(1), "%Y-%m-%d %H:%M").replace(tzinfo=TAIPEI).timestamp() * 1000)
+    cand = [r for r in closed_1d if upd_ms is None or r["close_time"] <= upd_ms]
+    m = re.search(r"日線收盤\s*([\d,]+(?:\.\d+)?)", str(reason))
+    if m:
+        px = float(m.group(1).replace(",", ""))
+        hit = [r for r in cand if abs(r["close"] - px) < 0.05]
+        if hit:
+            return bar_date(hit[-1])
+    if cand:
+        return bar_date(cand[-1])
+    return None
+
+
+def resolve_overhead(state: dict) -> list[float]:
+    """跌破後變成壓力的原主區間下緣。舊狀態檔沒記：從重算原因「低於主區間下沿 X」補。"""
+    v = state.get("overhead_levels")
+    if v is not None:
+        return sorted(float(x) for x in v)
+    m = re.search(r"低於主區間下沿\s*([\d,]+)", str(state.get("last_recompute_reason") or ""))
+    return [float(m.group(1).replace(",", ""))] if m else []
+
+
+def pressure_view(rng: dict, price: float, overhead: list[float], sf: dict) -> dict:
+    """「先減倉」指的是哪個價位。
+    edge：現價還在上沿下方，壓力就是上沿。
+    overhead：現價已在上沿上方，上方還有跌破後變成壓力的原主區間下緣，壓力就是它。
+    above_edge：現價在上沿上方，上方沒有記下的壓力。
+    need_reclaim：最新日線是從上方跌下來收在框上，框不能再拿來站穩，要日線收回上方壓力才算轉強。"""
+    hi = rng["high"]
+    former = bool(rng.get("high_former_low"))
+    above = [x for x in overhead if x > max(price, hi)]
+    if price <= hi:
+        return {"kind": "edge", "level": hi, "former_low": former, "need_reclaim": False}
+    if above:
+        return {"kind": "overhead", "level": min(above), "former_low": True,
+                "need_reclaim": bool(sf.get("came_from_above"))}
+    return {"kind": "above_edge", "level": hi, "former_low": former, "need_reclaim": False}
+
+
+def stand_firm(closed_1d: list[dict], closed_4h: list[dict], zone: list[float], birth: str | None = None) -> dict:
     """站穩判定：只用已收完日線收盤，4h 不能當站穩。影線穿過與未收完的 K 不算。
 
     至少一根已收完日線收盤 >= 上沿（67,000），且最新已收完日線仍未收在上沿下方。
@@ -540,15 +627,24 @@ def stand_firm(closed_1d: list[dict], closed_4h: list[dict], zone: list[float]) 
     # 不再因為更早某一根曾收上去就沿用。4h 收盤與現價只算測試，另由 hold_side 標記。
     daily_hit = any(r["close"] >= lo for r in closed_1d) if closed_1d else False
     last = closed_1d[-1] if closed_1d else None
-    daily_held = bool(last and last["close"] >= lo)
+    daily_above = bool(last and last["close"] >= lo)
+    # 站穩必須由下往上收上去：連續收在框下緣以上的這段，要在框成立之後才開始，
+    # 而且前一根收在框下緣下方。從上方跌下來、收在新框上方的那根，不算站上。
+    streak = close_streak(closed_1d, lambda c: c >= lo)
+    from_below = daily_above and crossed_after(streak, birth, strict=False)
+    daily_held = bool(daily_above and from_below)
     return {
         "ok": daily_held,
-        "daily_close_above": daily_held,
+        "daily_close_above": daily_above,
+        "from_below": from_below,
+        "came_from_above": bool(daily_above and not from_below),
+        "streak_start": streak["start"],
+        "can_recompute": bool(daily_held and crossed_after(streak, birth, strict=True)),
         "daily_had_close_above": daily_hit,
         "last_close": last["close"] if last else None,
         "last_close_time": fmt_time(taipei_of(last["open_time"])) if last else None,
         "zone": zone,
-        "rule": "只看已收完日線：收盤站上上沿且最新日線未再收跌回。4h 不能當站穩。影線穿過不算，未收完的 K 不算。",
+        "rule": "只看已收完日線：最新日線收在上沿以上，而且是在框成立後由下往上收上去；從上方跌下來收在框上不算。4h 不能當站穩。影線穿過不算，未收完的 K 不算。",
     }
 
 
@@ -582,7 +678,9 @@ def check_state(state: dict, market: dict) -> dict:
     last_1d = _last_closed(d1)
     c4 = last_4h["close"] if last_4h else None
     c1 = last_1d["close"] if last_1d else None
-    sf = stand_firm(closed_bars(d1), closed_bars(h4), zone)
+    cd1 = closed_bars(d1)
+    birth = resolve_recompute_bar(state, cd1)
+    sf = stand_firm(cd1, closed_bars(h4), zone, birth)
 
     # 站穩後現價與 4h 的位置：只算測試，不改日線結論，但文字要跟著現價走
     price_now = market["price"]
@@ -600,23 +698,48 @@ def check_state(state: dict, market: dict) -> dict:
 
     events = []
     departed = False
+    guard = []  # 收在區間外但不重算的原因（同一根已用過、從反方向收過來）
+    def _fresh(pred) -> bool:
+        return crossed_after(close_streak(cd1, pred), birth, strict=True)
     # 脫離／重算只看已收完日線（R27：要撐過幾天才算）。4h 只標記試探。
+    # 同一根日線不能重複用來重算；收在區間外的那一段要在框成立之後才從另一側收過來。
     if c1 is not None and c1 < lo:
-        departed = True
-        events.append({"type": "depart_below", "tf": "1d", "close": c1, "level": lo,
-                       "reason": f"日線收盤 {fmt_px(c1, 1)} 低於主區間下沿 {fmt_px(lo)}"})
+        if _fresh(lambda c: c < lo):
+            departed = True
+            events.append({"type": "depart_below", "tf": "1d", "close": c1, "level": lo,
+                           "reason": f"日線收盤 {fmt_px(c1, 1)} 低於主區間下沿 {fmt_px(lo)}"})
+        else:
+            guard.append(f"日線收盤 {fmt_px(c1, 1)} 在下沿下方，但不是框成立後才跌破的新一根，不重算")
     if c1 is not None and c1 > hi:
-        departed = True
-        events.append({"type": "depart_above", "tf": "1d", "close": c1, "level": hi,
-                       "reason": f"日線收盤 {fmt_px(c1, 1)} 高於主區間上沿 {fmt_px(hi)}"})
+        if _fresh(lambda c: c > hi):
+            departed = True
+            events.append({"type": "depart_above", "tf": "1d", "close": c1, "level": hi,
+                           "reason": f"日線收盤 {fmt_px(c1, 1)} 高於主區間上沿 {fmt_px(hi)}"})
+        elif not sf.get("came_from_above"):
+            guard.append(f"日線收盤 {fmt_px(c1, 1)} 在上沿上方，但這根就是觸發上次重算的那根，不再重算")
     if c1 is not None and c1 < stop:
-        departed = True
-        events.append({"type": "stop_break", "tf": "1d", "close": c1, "level": stop,
-                       "reason": f"日線收盤 {fmt_px(c1, 1)} 跌破最終停損 {fmt_px(stop)}"})
-    if sf["ok"]:
+        if _fresh(lambda c: c < stop):
+            departed = True
+            events.append({"type": "stop_break", "tf": "1d", "close": c1, "level": stop,
+                           "reason": f"日線收盤 {fmt_px(c1, 1)} 跌破最終停損 {fmt_px(stop)}"})
+        else:
+            guard.append(f"日線收盤 {fmt_px(c1, 1)} 在停損下方，但不是框成立後才跌破的新一根，不重算")
+    overhead = resolve_overhead(state)
+    if c1 is not None and c1 > hi and not departed:
+        reclaimed = [x for x in overhead if c1 > x and _fresh(lambda c, x=x: c > x)]
+        if reclaimed:
+            lvl = max(reclaimed)
+            departed = True
+            events.append({"type": "reclaim_overhead", "tf": "1d", "close": c1, "level": lvl,
+                           "reason": f"日線收盤 {fmt_px(c1, 1)} 由下往上收回上方壓力 {fmt_px(lvl)}，主區間往上重算"})
+    if sf["ok"] and sf.get("can_recompute"):
         departed = True
         events.append({"type": "stand_firm", "zone": zone,
                        "reason": f"日線已站穩 {fmt_px(zone[0])}–{fmt_px(zone[1])}，確認轉強，主區間需重算"})
+    elif sf["ok"]:
+        guard.append("站穩的那根就是觸發上次重算的那根，不再重算")
+    elif sf.get("came_from_above") and not any(e["type"] == "reclaim_overhead" for e in events):
+        guard.append(f"日線收盤 {fmt_px(c1, 1)} 在框上，但框成立時價格就已經在框上方，是從上方跌下來，不是由下往上收上去，不算站上，不重算")
 
     # 4h 試探：單根或連續兩根 4h 收盤越出區間，日線仍在區間內時只標記、不重算
     fourh_probe = None
@@ -690,6 +813,10 @@ def check_state(state: dict, market: dict) -> dict:
     return {
         "departed": departed,
         "recompute": departed,
+        "recompute_bar": birth,
+        "recompute_guard": guard,
+        "overhead_levels": overhead,
+        "pressure": pressure_view(rng, market["price"], overhead, sf),
         "events": events,
         "intra_triggers": intra,
         "fourh_probe": fourh_probe,
@@ -721,7 +848,7 @@ def check_state(state: dict, market: dict) -> dict:
                 f"日線未脫離主區間；{next((x['note'] for x in intra if x.get('type')=='fourh_probe'), '')}，沿用現有劇本"
                 if fourh_probe else
                 "未脫離主區間，也未打到失效價或站穩確認，沿用現有劇本"
-            )
+            ) + ("；" + "；".join(guard) if guard else "")
         ),
     }
 
@@ -882,6 +1009,55 @@ def recompute_range(market: dict, depart_reason: str) -> dict:
         "retracement": round(retr, 4),
         "pause": pause_refs[0] if pause_refs else None,
         "note": f"因「{depart_reason}」依流程重算：上沿取急跌後第一個清楚停頓再落到整數，下沿取整數關，0.886＝{fmt_px(fib_0886, 1)}",
+    }
+
+
+def recompute_range_up(market: dict, old_rng: dict, support: list[float], overhead: list[float], depart_reason: str) -> dict:
+    """往上突破後重算：被突破的框轉成支撐，新主區間下沿＝框下緣、分批看框上緣；
+    上沿取突破收盤與框上緣以上最近的壓力：跌破後記下的原主區間下緣、原上沿參考價、近 10 根日線高點、日線擺動高點，
+    都落到整數；都沒有才取收盤上方約 3% 的整數。新框一定在被突破的框上方。"""
+    d1 = closed_bars(market["klines"]["1d"])
+    if not d1:
+        raise RuntimeError("沒有已收完日線，無法往上重算")
+    last = d1[-1]
+    s0, s1 = float(support[0]), float(support[1])
+    base = max(last["close"], s1)
+    cands = {float(x) for x in overhead if x > base}
+    for x in (old_rng.get("upper_refs") or []):
+        f = float(math.floor(x / UPPER_ROUND) * UPPER_ROUND)
+        if f > base:
+            cands.add(f)
+    for bar in d1[-10:]:  # 近段日線高點：上方最近的密集區
+        f = float(math.floor(bar["high"] / UPPER_ROUND) * UPPER_ROUND)
+        if f > base:
+            cands.add(f)
+    for typ, bar in _swings(d1[-120:]):
+        if typ == "H":
+            f = float(math.floor(bar["high"] / UPPER_ROUND) * UPPER_ROUND)
+            if f > base:
+                cands.add(f)
+    if not cands:
+        cands.add(float(math.ceil(base * 1.03 / UPPER_ROUND) * UPPER_ROUND))
+    hi = min(cands)
+    stop = float(s0 - STAND_FIRM_BAND)  # 實體跌回被突破的框下方就認錯，停損放在框下緣再下去一個確認帶寬
+    if not (s0 < hi and hi > s1 and stop < s0):
+        raise RuntimeError("往上重算結果不合理")
+    return {
+        "low": s0,
+        "high": hi,
+        "upper_refs": sorted(cands),
+        "lower_supports": [s1, s0],
+        "val": s1,
+        "val_estimated": False,
+        "fib_0786": s1,
+        "fib_0886": s1,
+        "final_stop": stop,
+        "stand_firm_zone": [hi, hi + STAND_FIRM_BAND],
+        "pause": None,
+        "direction": "up",
+        "broken_zone": [s0, s1],
+        "high_former_low": hi in {float(x) for x in overhead},
+        "note": f"因「{depart_reason}」往上重算：被突破的 {fmt_px(s0)}–{fmt_px(s1)} 轉成支撐，上沿取上方最近壓力 {fmt_px(hi)}",
     }
 
 
@@ -1104,6 +1280,11 @@ def bias_line(check: dict, rng: dict, ma_d: dict) -> tuple[str, str, str]:
     if st == "lower":
         return ("偏多", "已經靠近下沿，可以分批做現貨或小倉多", invalid)
     if st == "upper":
+        kind = ((check or {}).get("pressure") or {}).get("kind")
+        if kind == "overhead":
+            return ("減倉", "已經靠近上方壓力，這裡先減倉，不要追多", invalid)
+        if kind == "above_edge":
+            return ("減倉", "已經站到上沿上方，還沒站穩，這裡先減倉，不要追多", invalid)
         return ("減倉", "已經靠近上沿，這裡先減倉，不要追多", invalid)
     if st == "no_range":
         return ("觀望", "還在急跌，先等清楚停頓再定區間", "停頓前不抄底、也不追空")
@@ -1283,6 +1464,8 @@ def render_btc_short(now: datetime, market: dict, rng: dict, check: dict, ma_d: 
             "這裡先不做多，等下一根日線收盤，收回框上才算守住，收在框下就不算站穩。"
         )
         return (body + ma + macd).strip() + "\n"
+    if st == "upper":
+        return (upper_btc_body(head, rng, check, lo, hi, stop, batch, confirm) + ma + macd + probe).strip() + "\n"
     if st == "lower":
         loc = "已經靠近下沿，可以分批做現貨或小倉多"
     elif st == "upper":
@@ -1300,7 +1483,34 @@ def render_btc_short(now: datetime, market: dict, rng: dict, check: dict, ma_d: 
     return text.strip() + "\n"
 
 
-def key_levels_voice(rng: dict, st: str) -> str:
+def _pressure(check: dict | None, rng: dict) -> dict:
+    pv = (check or {}).get("pressure")
+    return pv or {"kind": "edge", "level": rng["high"], "former_low": bool(rng.get("high_former_low")), "need_reclaim": False}
+
+
+def upper_btc_body(head: str, rng: dict, check: dict, lo: str, hi: str, stop: str, batch: str, confirm: str) -> str:
+    """靠近上沿／上方壓力的 /btc 段：寫明是哪個價位，每個數字只出現一次。"""
+    pv = _pressure(check, rng)
+    tail_confirm = f"要突破並站穩 {confirm} 確認帶才算轉強，還沒站穩以前，中間也不開新單。"
+    if pv["kind"] == "overhead":
+        body = (head + f"已經靠近上方壓力 {fmt_px(pv['level'])}，這裡先減倉，不要追多。"
+                "這裡原本是主區間下沿，跌破後變成壓力。"
+                f"主區間是 {lo} 到 {hi}：靠近 {batch}，再分批現貨或小倉多，停損 {stop}；")
+        if pv.get("need_reclaim"):
+            body += "日線要由下往上收回上方壓力，才算轉強，還沒收上去以前，中間也不開新單。"
+        else:
+            body += tail_confirm
+        return body
+    former = "這個上沿原本是主區間下沿，跌破後變成壓力。" if pv.get("former_low") else ""
+    if pv["kind"] == "above_edge":
+        return (head + f"已經站到上沿 {hi} 上方，但日線還沒由下往上站穩，這裡先減倉，不要追多。" + former
+                + f"主區間下沿是 {lo}：靠近 {batch}，再分批現貨或小倉多，停損 {stop}；"
+                + f"要日線由下往上站穩 {confirm} 確認帶才算轉強，還沒站穩以前，中間也不開新單。")
+    return (head + f"已經靠近上沿 {hi}，這裡先減倉，不要追多。" + former
+            + f"主區間下沿是 {lo}：靠近 {batch}，再分批現貨或小倉多，停損 {stop}；" + tail_confirm)
+
+
+def key_levels_voice(rng: dict, st: str, check: dict | None = None) -> str:
     if st == "no_range":
         return "尚未形成主區間"
     lo, hi = fmt_px(rng["low"]), fmt_px(rng["high"])
@@ -1318,6 +1528,12 @@ def key_levels_voice(rng: dict, st: str) -> str:
         return f"前高框 {z0}–{z1}；回測沒守住，等日線收盤再判"
     batch = batch_levels_text(rng)
     confirm = fmt_px(rng["stand_firm_zone"][1])
+    if st == "upper":
+        pv = _pressure(check, rng)
+        if pv["kind"] == "overhead":
+            return (f"上方壓力 {fmt_px(pv['level'])}；主區間 {lo}–{hi}；分批 {batch}；停損 {stop}"
+                    + ("" if pv.get("need_reclaim") else f"；上沿確認到 {confirm}"))
+        return f"主區間下沿 {lo}、上沿 {hi}；分批 {batch}；停損 {stop}；上沿確認到 {confirm}"
     return f"主區間 {lo}–{hi}；分批 {batch}；停損 {stop}；上沿確認到 {confirm}"
 
 
@@ -1335,7 +1551,16 @@ def short_direction_voice(st: str, check: dict) -> str:
     if st == "lower":
         return "已經靠近下沿，可以分批做現貨或小倉多，停損放在已寫的位置。靠近上沿就減倉；要突破並站穩確認帶，才算轉強。"
     if st == "upper":
-        return "已經靠近上沿，這裡先減倉，不要追多。要突破並站穩確認帶，才算轉強；還沒站穩以前，中間也不開新單。"
+        pv = (check or {}).get("pressure") or {"kind": "edge"}
+        if pv.get("kind") == "overhead":
+            return ("已經靠近上方壓力，這裡先減倉，不要追多；這個壓力原本是主區間下沿，跌破後變成壓力。"
+                    + ("日線要由下往上收回上方壓力，才算轉強；還沒收上去以前，中間也不開新單。" if pv.get("need_reclaim")
+                       else "要突破並站穩確認帶，才算轉強；還沒站穩以前，中間也不開新單。"))
+        former = "這個上沿原本是主區間下沿，跌破後變成壓力。" if pv.get("former_low") else ""
+        if pv.get("kind") == "above_edge":
+            return ("已經站到上沿上方，但日線還沒由下往上站穩，這裡先減倉，不要追多。" + former
+                    + "要日線由下往上站穩確認帶，才算轉強；還沒站穩以前，中間也不開新單。")
+        return "已經靠近上沿，這裡先減倉，不要追多。" + former + "要突破並站穩確認帶，才算轉強；還沒站穩以前，中間也不開新單。"
     return "還在區間中間，這裡不開新單。靠近下沿再分批現貨或小倉多，靠近上沿就減倉；要突破並站穩確認帶，才算轉強。"
 
 
@@ -1372,7 +1597,7 @@ def render_report(now: datetime, market: dict, rng: dict, check: dict, ma_d: dic
     bank = load_btc_bank_target()
     if bank:
         lines.append(f"投行目標｜{bank}")
-    lines.append(f"關鍵價位｜{key_levels_voice(rng, st)}")
+    lines.append(f"關鍵價位｜{key_levels_voice(rng, st, check)}")
     obs = short_direction_voice(st, check)
     ma = ma120_voice(ma_d, "report")
     macd = macd_voice(macd_d, macd_4, "report")
@@ -1396,7 +1621,7 @@ def render_report_slim(now: datetime, market: dict, rng: dict, check: dict, ma_d
     lines = ["【/report 精簡版】"]
     lines.append(f"現價｜{fmt_px(price)} 美元，{fmt_time_text(now)}")
     lines.append(f"投行目標｜{bank}" if bank else "投行目標｜")
-    lines.append(f"關鍵價位｜{key_levels_voice(rng, st)}")
+    lines.append(f"關鍵價位｜{key_levels_voice(rng, st, check)}")
     lines.append(f"短線方向｜{short_direction_voice(st, check).rstrip('。')}。")
     bullets = []
     ma = ma120_voice(ma_d, "report")
@@ -1458,13 +1683,41 @@ def run(out_dir: Path, force_recompute: bool = False, seed: bool = False, market
     macd_4 = macd_view(market["klines"]["4h"])
 
     check = check_state(state, market)
+    if not state.get("last_recompute_bar") and check.get("recompute_bar"):
+        state["last_recompute_bar"] = check["recompute_bar"]
+    if state.get("overhead_levels") is None:
+        state["overhead_levels"] = check.get("overhead_levels") or []
     did_recompute = False
     if force_recompute or check["recompute"]:
         reason = check["reason_text"] if check["recompute"] else "手動強制重算"
-        new_rng = recompute_range(market, reason)
+        ev_types = {e.get("type") for e in check.get("events") or []}
+        overhead = resolve_overhead(state)
+        old_rng = state.get("main_range", {})
+        go_up = (not force_recompute and bool(ev_types & {"stand_firm", "depart_above", "reclaim_overhead"})
+                 and not ev_types & {"depart_below", "stop_break"})
+        if go_up:
+            if "reclaim_overhead" in ev_types:
+                lvl = max(e["level"] for e in check["events"] if e.get("type") == "reclaim_overhead")
+                support = [lvl, lvl + STAND_FIRM_BAND]
+            else:
+                support = list(old_rng["stand_firm_zone"])
+            # 同一根若也收上了記下的上方壓力，支撐改用收上去的那一個
+            _c = (check.get("closed_1d") or {}).get("close")
+            _over = [x for x in overhead if _c is not None and support[1] < x < _c]
+            if _over:
+                support = [max(_over), max(_over) + STAND_FIRM_BAND]
+            new_rng = recompute_range_up(market, old_rng, support, overhead, reason)
+        else:
+            new_rng = recompute_range(market, reason)
+            new_rng.update(direction="down", broken_zone=None, high_former_low=False)
+            if ev_types & {"depart_below", "stop_break"} and old_rng.get("low") is not None:
+                overhead = sorted(set(overhead) | {float(old_rng["low"])})
+        state["overhead_levels"] = [x for x in overhead if x > new_rng["high"]]
         state["main_range"] = {**state.get("main_range", {}), **new_rng}
         state["scenarios"] = scenarios_from_range(state["main_range"])
         state["last_recompute_reason"] = reason
+        _lb = _last_closed(market["klines"]["1d"])
+        state["last_recompute_bar"] = bar_date(_lb) if _lb else state.get("last_recompute_bar")
         did_recompute = True
         # 重算後再對新區間定位一次（距離與 position 用新區間）
         check = check_state(state, market)
@@ -1489,6 +1742,7 @@ def run(out_dir: Path, force_recompute: bool = False, seed: bool = False, market
         "macd": {"1d": macd_d, "4h": macd_4},
         "scenarios": state["scenarios"],
         "last_recompute_reason": state.get("last_recompute_reason"),
+        "last_recompute_bar": state.get("last_recompute_bar"),
         "origin": state.get("origin"),
     }
     btc_txt = render_btc_short(now, market, rng, check, ma_d, ma_w, macd_d, macd_4, state["scenarios"])
@@ -1508,7 +1762,10 @@ def run(out_dir: Path, force_recompute: bool = False, seed: bool = False, market
     levels = {
         "bias": direction,
         "watch": f"短線{direction}；{target}。失效：{invalid}。",
-        "support_pressure": f"支撐 {supports}｜壓力 {fmt_px(rng['stand_firm_zone'][0])}、{fmt_px(rng['stand_firm_zone'][1])}",
+        "support_pressure": (
+            f"支撐 {fmt_px(rng['high'])}、{supports}｜壓力 {fmt_px(check['pressure']['level'])}"
+            if (check.get("pressure") or {}).get("kind") == "overhead" else
+            f"支撐 {supports}｜壓力 {fmt_px(rng['stand_firm_zone'][0])}、{fmt_px(rng['stand_firm_zone'][1])}"),
         "forecast_invalid": invalid,
         "targets": rng.get("lower_supports"),
         "inv": rng.get("final_stop"),
@@ -1530,6 +1787,8 @@ def run(out_dir: Path, force_recompute: bool = False, seed: bool = False, market
         "main_range": rng,
         "scenarios": state["scenarios"],
         "last_recompute_reason": state.get("last_recompute_reason"),
+        "last_recompute_bar": state.get("last_recompute_bar"),
+        "overhead_levels": state.get("overhead_levels") or [],
         "updated_at": fmt_time(now),
     }
     state_path.write_text(json.dumps(persist, ensure_ascii=False, indent=2) + "\n")
