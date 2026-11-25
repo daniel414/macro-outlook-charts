@@ -497,12 +497,41 @@ def _short_model_script():
 def _short_model_out():
     return os.path.join(HERE, "out", "short_model")
 
+# 這次執行短線模型的結果：ok=False 時發布會沿用舊短線段，必須寫 log、在輸出標記（不能默默發出去）
+SHORT_RUN = {"ok": None, "reason": "", "warns": [], "fallback": ""}
+SHORT_FALLBACK_LOG = os.path.join(HERE, "logs", "short_fallback.log")
+def _short_fail(reason):
+    SHORT_RUN.update(ok=False, reason=(reason or "").strip()[-300:])
+def short_fallback_note(sp_path):
+    """沿用舊段時的說明：舊段是哪個時間產生的、為什麼沒更新。"""
+    if os.path.isfile(sp_path):
+        age = datetime.fromtimestamp(os.path.getmtime(sp_path)).strftime("%Y-%m-%d %H:%M")
+        return f"短線模型這次失敗，發布沿用 {age} 產生的舊短線段；原因：{SHORT_RUN['reason'] or '未知'}"
+    return f"短線模型這次失敗，也沒有舊的短線段檔，沿用預測文原本的短線段；原因：{SHORT_RUN['reason'] or '未知'}"
+def report_short_status(stamp, dry):
+    """把短線 WARN 與沿用舊段印到 stdout 並寫 log；沒事就不輸出。"""
+    lines = [f"SHORT_WARN {w}" for w in SHORT_RUN["warns"]]
+    if SHORT_RUN["fallback"]:
+        lines.append("SHORT_FALLBACK " + SHORT_RUN["fallback"])
+    if not lines:
+        return
+    for ln in lines:
+        print(ln)
+        print(ln, file=sys.stderr)
+    try:
+        os.makedirs(os.path.dirname(SHORT_FALLBACK_LOG), exist_ok=True)
+        with open(SHORT_FALLBACK_LOG, "a", encoding="utf-8") as fh:
+            for ln in lines:
+                fh.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} stamp={stamp}{' dry-run' if dry else ''} {ln}\n")
+    except OSError as e:
+        print("short_fallback log failed:", e, file=sys.stderr)
 def run_short_model(price=None, when=None):
     """Run short_model.py as a script (never import). Returns the output dir or None.
     price／when 為發布標題的統一現價與時間，傳給 --price／--when，不再讓短線自己抓價。"""
     script = _short_model_script()
     if not script:
         print("short_model skipped: script not found", file=sys.stderr)
+        _short_fail("找不到 short_model.py")
         return None
     out = _short_model_out()
     os.makedirs(out, exist_ok=True)
@@ -517,12 +546,16 @@ def run_short_model(price=None, when=None):
                            capture_output=True, text=True, timeout=90)
         if r.stderr:
             print(r.stderr.rstrip(), file=sys.stderr)
+        SHORT_RUN["warns"] = [ln.split("WARN short_model:", 1)[1].strip() for ln in (r.stderr or "").splitlines() if "WARN short_model:" in ln]
         if r.returncode != 0:
             print("short_model failed:", (r.stderr or r.stdout or "")[-500:], file=sys.stderr)
+            _short_fail(f"exit {r.returncode}：" + " ".join(ln for ln in (r.stderr or r.stdout or "").splitlines() if "WARN short_model:" not in ln)[-250:])
             return None
+        SHORT_RUN.update(ok=True, reason="")
         return out
     except Exception as e:
         print("short_model skipped:", e, file=sys.stderr)
+        _short_fail(f"{type(e).__name__}: {e}")
         return None
 
 
@@ -675,8 +708,10 @@ def build_forecast(text, price=None, when=None):
         short = None
         sm_out = _short_model_out()
         sp = os.path.join(sm_out, "forecast_short.txt")
-        if not os.path.isfile(sp):
+        if not os.path.isfile(sp) and SHORT_RUN["ok"] is None:
             run_short_model(price=price, when=when)
+        if SHORT_RUN["ok"] is False:
+            SHORT_RUN["fallback"] = short_fallback_note(sp)
         if os.path.isfile(sp):
             short = open(sp).read().strip()
         if short and short.startswith("【短線】"):
@@ -892,6 +927,7 @@ def main():
     fparts = write_forecast_parts(fc)
     merged = merge_summary(fc, text) != text
     print(text)
+    report_short_status(stamp, a.dry_run)
     print("FORECAST_FILE", FORECAST_FILE, len(fc), "parts", [len(x) for x in fparts], "merged_into_summary", merged, file=sys.stderr)
     print("SEND_FILES", SUMMARY_SEND, LEAD_SEND, FORECAST_FILE, file=sys.stderr)
     if a.dry_run: return

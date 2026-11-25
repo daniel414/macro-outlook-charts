@@ -609,12 +609,15 @@ def pressure_view(rng: dict, price: float, overhead: list[float], sf: dict) -> d
     former = bool(rng.get("high_former_low"))
     above = [x for x in overhead if x > max(price, hi)]
     zone = rng.get("stand_firm_zone") or [None, None]
-    ac = bool(zone[1] is not None and price > zone[1])
+    ac = bool(zone[1] is not None and price >= zone[1])
     if price <= hi:
         return {"kind": "edge", "level": hi, "former_low": former, "need_reclaim": False, "above_confirm": ac}
     if above:
+        # 現價還在確認帶上緣下方：最近的壓力是確認帶上緣，原主區間下緣是站上之後的下一道壓力
+        ic = bool(zone[1] is not None and price < zone[1] and zone[1] < min(above))
         return {"kind": "overhead", "level": min(above), "former_low": True,
-                "need_reclaim": bool(sf.get("came_from_above")), "above_confirm": ac}
+                "need_reclaim": bool(sf.get("came_from_above")), "above_confirm": ac,
+                "in_confirm": ic, "near_level": float(zone[1]) if ic else min(above)}
     return {"kind": "above_edge", "level": hi, "former_low": former, "need_reclaim": False, "above_confirm": ac}
 
 
@@ -1311,15 +1314,41 @@ def unique_number_errors(*parts: tuple[str, str]) -> list[str]:
     return errs
 
 
-def text_pressure_errors(sp: dict, *texts: str) -> list[str]:
-    """短線文字、關鍵價位裡寫成「壓力」的數字，必須是現價上方那一檔。"""
+def text_pressures(*texts: str) -> tuple[list[str], list[str]]:
+    """(文字裡寫成「壓力 X」的數字, 寫成「下一道壓力 X」的數字)。"""
+    near, nxt = [], []
+    for t in texts:
+        nxt += re.findall(r"下一道壓力\s*(\d[\d,]*)", t)
+        near += re.findall(r"(?<!下一道)壓力\s*(\d[\d,]*)", t)
+    return near, nxt
+
+
+def text_pressure_errors(sp: dict, *texts: str, levels: list[float] | None = None) -> list[str]:
+    """短線文字、關鍵價位裡寫成「壓力」的數字，必須是 levels 那一檔；「下一道壓力」必須是它上方最近的已知價位。"""
     errs = []
     want = fmt_px(sp["pressure"]) if sp.get("pressure") is not None else None
-    for t in texts:
-        for m in re.finditer(r"壓力\s*(\d[\d,]*)", t):
-            if m.group(1) != want:
-                errs.append(f"文字把 {m.group(1)} 寫成壓力，但它不是現價上方最近的已知價位")
+    near, nxt = text_pressures(*texts)
+    for x in near:
+        if x != want:
+            errs.append(f"文字把 {x} 寫成壓力，但 levels 的壓力是 {want or '無'}")
+    if nxt:
+        above = [v for v in (levels or []) if sp.get("pressure") is not None and v > sp["pressure"]]
+        want2 = fmt_px(min(above)) if above else None
+        for x in nxt:
+            if x != want2:
+                errs.append(f"文字把 {x} 寫成下一道壓力，但它不是 levels 壓力上方最近的已知價位")
     return errs
+
+
+def align_pressure_to_text(sp: dict, price: float, *texts: str) -> dict | None:
+    """文字和 levels 的壓力對不上時，以文字的壓力為準重算 levels 那行（支撐不動）。文字沒寫壓力就不列壓力。"""
+    near, _ = text_pressures(*texts)
+    vals = sorted({float(x.replace(",", "")) for x in near})
+    above = [v for v in vals if v > price]
+    if len(above) > 1:
+        return None
+    return {"supports": [x for x in sp["supports"] if not above or x < above[0]],
+            "pressure": above[0] if above else None}
 
 
 def bias_line(check: dict, rng: dict, ma_d: dict) -> tuple[str, str, str]:
@@ -1545,7 +1574,7 @@ def _above_confirm(check: dict | None, rng: dict) -> bool:
     """現價已在站穩確認帶上緣上方（確認帶此時是支撐，不是要突破的價位）。"""
     px = (check or {}).get("price")
     zone = (rng or {}).get("stand_firm_zone") or [None, None]
-    return px is not None and zone[1] is not None and float(px) > float(zone[1])
+    return px is not None and zone[1] is not None and float(px) >= float(zone[1])
 
 
 def _pressure(check: dict | None, rng: dict) -> dict:
@@ -1560,6 +1589,17 @@ def upper_btc_body(head: str, rng: dict, check: dict, lo: str, hi: str, stop: st
         tail_confirm = f"要日線由下往上站穩 {confirm} 確認帶才算轉強，還沒站穩以前，中間也不開新單。"
     else:
         tail_confirm = f"要突破並站穩 {confirm} 確認帶才算轉強，還沒站穩以前，中間也不開新單。"
+    if pv["kind"] == "overhead" and pv.get("in_confirm"):
+        body = (head + f"已經站到上沿 {hi} 上方，靠近上方壓力 {confirm}，這裡先減倉，不要追多。"
+                f"主區間下沿是 {lo}：靠近 {batch}，再分批現貨或小倉多，停損 {stop}；")
+        nxt = fmt_px(pv["level"])
+        if pv.get("need_reclaim"):
+            body += (f"站上之後的下一道壓力 {nxt}，這裡原本是主區間下沿，跌破後變成壓力；"
+                     "日線要由下往上收回這道壓力，才算轉強，還沒收上去以前，中間也不開新單。")
+        else:
+            body += (f"要突破並站穩這道壓力才算轉強；站上之後的下一道壓力 {nxt}，這裡原本是主區間下沿，跌破後變成壓力；"
+                     "還沒站穩以前，中間也不開新單。")
+        return body
     if pv["kind"] == "overhead":
         body = (head + f"已經靠近上方壓力 {fmt_px(pv['level'])}，這裡先減倉，不要追多。"
                 "這裡原本是主區間下沿，跌破後變成壓力。"
@@ -1598,6 +1638,8 @@ def key_levels_voice(rng: dict, st: str, check: dict | None = None) -> str:
     confirm = fmt_px(rng["stand_firm_zone"][1])
     if st == "upper":
         pv = _pressure(check, rng)
+        if pv["kind"] == "overhead" and pv.get("in_confirm"):
+            return f"上方壓力 {confirm}；下一道壓力 {fmt_px(pv['level'])}；主區間 {lo}–{hi}；分批 {batch}；停損 {stop}"
         if pv["kind"] == "overhead":
             return (f"上方壓力 {fmt_px(pv['level'])}；主區間 {lo}–{hi}；分批 {batch}；停損 {stop}"
                     + ("" if pv.get("need_reclaim") else f"；上沿確認到 {confirm}"))
@@ -1620,6 +1662,11 @@ def short_direction_voice(st: str, check: dict) -> str:
         return "已經靠近下沿，可以分批做現貨或小倉多，停損放在已寫的位置。靠近上沿就減倉；要突破並站穩確認帶，才算轉強。"
     if st == "upper":
         pv = (check or {}).get("pressure") or {"kind": "edge"}
+        if pv.get("kind") == "overhead" and pv.get("in_confirm"):
+            return ("已經站到上沿上方，靠近上方壓力，這裡先減倉，不要追多。"
+                    + ("站上之後還有一道原本是主區間下沿的壓力，日線要由下往上收回那道壓力，才算轉強；還沒收上去以前，中間也不開新單。"
+                       if pv.get("need_reclaim") else
+                       "要突破並站穩這道壓力，才算轉強；站上之後還有一道原本是主區間下沿的壓力；還沒站穩以前，中間也不開新單。"))
         if pv.get("kind") == "overhead":
             return ("已經靠近上方壓力，這裡先減倉，不要追多；這個壓力原本是主區間下沿，跌破後變成壓力。"
                     + ("日線要由下往上收回上方壓力，才算轉強；還沒收上去以前，中間也不開新單。" if pv.get("need_reclaim")
@@ -1818,17 +1865,22 @@ def run(out_dir: Path, force_recompute: bool = False, seed: bool = False, market
     btc_txt = render_btc_short(now, market, rng, check, ma_d, ma_w, macd_d, macd_4, state["scenarios"])
     report_txt = render_report(now, market, rng, check, ma_d, macd_d, macd_4)
     slim_txt = render_report_slim(now, market, rng, check, ma_d, macd_d, macd_4)
-
-    (out_dir / "short_model.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
-    (out_dir / "btc_short.txt").write_text(btc_txt)
-    (out_dir / "report_btc.txt").write_text(report_txt)
-    (out_dir / "report_slim.txt").write_text(slim_txt)
     forecast_short = "【短線】\n" + btc_txt
     if not forecast_short.endswith("\n"):
         forecast_short += "\n"
-    (out_dir / "forecast_short.txt").write_text(forecast_short)
     direction, target, invalid = bias_line(check, rng, ma_d)
-    sp_view = support_pressure_view(rng, check, float(market["price"]))
+    px_f = float(market["price"])
+    sp_view = support_pressure_view(rng, check, px_f)
+    warns = []
+    tp_errs = text_pressure_errors(sp_view, btc_txt, slim_txt, report_txt, levels=known_levels(rng, check))
+    if tp_errs:
+        fixed = align_pressure_to_text(sp_view, px_f, btc_txt, slim_txt, report_txt)
+        if fixed is not None:
+            warns.append("支撐壓力行和文字的壓力對不上，已以文字為準重算：" + "；".join(dict.fromkeys(tp_errs))
+                         + f"；原本「{support_pressure_text(sp_view)}」，改成「{support_pressure_text(fixed)}」")
+            sp_view = fixed
+        else:
+            warns.append("支撐壓力行和文字的壓力對不上，文字裡有兩檔以上的壓力，無法自動對齊：" + "；".join(dict.fromkeys(tp_errs)))
     sp_text = support_pressure_text(sp_view)
     levels = {
         "bias": direction,
@@ -1842,16 +1894,27 @@ def run(out_dir: Path, force_recompute: bool = False, seed: bool = False, market
         "stand_firm_zone": rng.get("stand_firm_zone"),
         "range": [rng.get("low"), rng.get("high")],
     }
-    (out_dir / "levels.json").write_text(json.dumps(levels, ensure_ascii=False) + "\n")
     payload["levels"] = levels
+    # 中止的只有：數字重複、支撐壓力放錯邊。中止時不寫任何輸出檔，發布端會看到失敗並標記沿用舊段。
     uniq_errs = unique_number_errors(("/btc 短線段", btc_txt), ("report_slim.txt", slim_txt))
-    uniq_errs += support_pressure_errors(sp_view, float(market["price"]), sp_text)
-    uniq_errs += text_pressure_errors(sp_view, btc_txt, slim_txt, report_txt)
+    uniq_errs += support_pressure_errors(sp_view, px_f, sp_text)
     payload["unique_check"] = {"ok": not uniq_errs, "errors": uniq_errs}
     if uniq_errs:
         for e in uniq_errs:
             print(e, file=sys.stderr)
         raise SystemExit(1)
+    if warns:
+        stamp = fmt_time(now)
+        with open(out_dir / "short_model_warn.log", "a", encoding="utf-8") as fh:
+            for w in warns:
+                print(f"WARN short_model: {w}", file=sys.stderr)
+                fh.write(f"{stamp} WARN {w}\n")
+    (out_dir / "short_model.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+    (out_dir / "btc_short.txt").write_text(btc_txt)
+    (out_dir / "report_btc.txt").write_text(report_txt)
+    (out_dir / "report_slim.txt").write_text(slim_txt)
+    (out_dir / "forecast_short.txt").write_text(forecast_short)
+    (out_dir / "levels.json").write_text(json.dumps(levels, ensure_ascii=False) + "\n")
     # 狀態檔只保留劇本與主區間，供隔日比對；不把每次現價寫死成新劇本
     persist = {
         "version": state.get("version", 1),
@@ -1912,7 +1975,7 @@ def demo_states(out_dir: Path) -> int:
             _sp = support_pressure_view(r, check, float(market["price"]))
             _spt = support_pressure_text(_sp)
             errs += support_pressure_errors(_sp, float(market["price"]), _spt)
-            errs += text_pressure_errors(_sp, btc, slim)
+            errs += text_pressure_errors(_sp, btc, slim, levels=known_levels(r, check))
             (out_dir / f"{name}_support_pressure.txt").write_text(_spt + "\n")
         other = []
         blob = btc + slim
