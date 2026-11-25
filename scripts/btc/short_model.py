@@ -536,20 +536,17 @@ def stand_firm(closed_1d: list[dict], closed_4h: list[dict], zone: list[float]) 
     收盤落在 67,000–67,500 或更高都算站穩。
     """
     lo, hi = zone[0], zone[1]
-    daily_hit = False
-    daily_held = False
-    if closed_1d:
-        for r in closed_1d:
-            if r["close"] >= lo:
-                daily_hit = True
-        if daily_hit and closed_1d[-1]["close"] >= lo:
-            daily_held = True
-        elif daily_hit and closed_1d[-1]["close"] < lo:
-            daily_held = False  # 曾站上又收跌回
+    # 結論只跟最新一根已收完日線走：它收在上沿以上才算站穩；收回上沿下方就不算，
+    # 不再因為更早某一根曾收上去就沿用。4h 收盤與現價只算測試，另由 hold_side 標記。
+    daily_hit = any(r["close"] >= lo for r in closed_1d) if closed_1d else False
+    last = closed_1d[-1] if closed_1d else None
+    daily_held = bool(last and last["close"] >= lo)
     return {
         "ok": daily_held,
         "daily_close_above": daily_held,
         "daily_had_close_above": daily_hit,
+        "last_close": last["close"] if last else None,
+        "last_close_time": fmt_time(taipei_of(last["open_time"])) if last else None,
         "zone": zone,
         "rule": "只看已收完日線：收盤站上上沿且最新日線未再收跌回。4h 不能當站穩。影線穿過不算，未收完的 K 不算。",
     }
@@ -586,6 +583,20 @@ def check_state(state: dict, market: dict) -> dict:
     c4 = last_4h["close"] if last_4h else None
     c1 = last_1d["close"] if last_1d else None
     sf = stand_firm(closed_bars(d1), closed_bars(h4), zone)
+
+    # 站穩後現價與 4h 的位置：只算測試，不改日線結論，但文字要跟著現價走
+    price_now = market["price"]
+    if sf["ok"]:
+        if price_now >= zone[1]:
+            sf["hold_side"] = "above"
+        elif price_now >= zone[0]:
+            sf["hold_side"] = "in_box"
+        else:
+            sf["hold_side"] = "lost"
+        sf["fourh_back_below"] = bool(c4 is not None and c4 < zone[0])
+    else:
+        sf["hold_side"] = None
+        sf["fourh_back_below"] = False
 
     events = []
     departed = False
@@ -702,7 +713,10 @@ def check_state(state: dict, market: dict) -> dict:
         },
         "distances": distances,
         "reason_text": (
-            "；".join(e["reason"] for e in events)
+            "；".join(e["reason"] for e in events) + (
+                "；現價跌回框下，只算回測、框上沒守住，要等日線收盤再改判"
+                if sf.get("hold_side") == "lost" else
+                "；現價回到框裡回測，日線結論不變" if sf.get("hold_side") == "in_box" else "")
             if events else (
                 f"日線未脫離主區間；{next((x['note'] for x in intra if x.get('type')=='fourh_probe'), '')}，沿用現有劇本"
                 if fourh_probe else
@@ -983,7 +997,15 @@ def update_scenario_status(scenarios: list[dict], check: dict) -> list[dict]:
         elif sid == "reduce_high":
             t["status"] = "active" if pos == "upper_zone" and not check["stand_firm"]["ok"] else "pending"
         elif sid == "stand_firm_long":
-            t["status"] = "active" if check["stand_firm"]["ok"] else "pending"
+            side = check["stand_firm"].get("hold_side")
+            if not check["stand_firm"]["ok"]:
+                t["status"] = "pending"
+            elif side == "lost":
+                t["status"] = "retest_lost"
+            elif side == "in_box":
+                t["status"] = "retest"
+            else:
+                t["status"] = "active"
         elif sid == "range_break_short":
             t["status"] = "active" if pos == "below" else "pending"
         out.append(t)
@@ -1073,6 +1095,10 @@ def bias_line(check: dict, rng: dict, ma_d: dict) -> tuple[str, str, str]:
     invalid = f"日線收盤跌破停損{(' ' + stop) if stop else ''}" if st != "invalid" else "這套已作廢，要重算"
     if st == "stand_firm":
         return ("偏多", "已經突破並站上框，實體還在框上面就做多", "實體跌回框裡就認錯停損")
+    if st == "stand_firm_retest":
+        return ("偏多", "現價回到框裡回測，守住才繼續偏多，先不追", "實體跌回框下就認錯停損")
+    if st == "stand_firm_lost":
+        return ("觀望", "現價跌回框下，這是回測、框上沒守住，先不做多", "日線收在框下就不算站穩")
     if st == "invalid":
         return ("觀望", "這套已作廢，認錯離場", invalid)
     if st == "lower":
@@ -1085,11 +1111,24 @@ def bias_line(check: dict, rng: dict, ma_d: dict) -> tuple[str, str, str]:
 
 
 def voice_state(check: dict, rng: dict | None) -> str:
-    """六種狀態：no_range / mid / lower / upper / stand_firm / invalid。"""
+    """狀態：no_range / mid / lower / upper / stand_firm / stand_firm_retest / stand_firm_lost / invalid。
+    stand_firm 只在最新已收完日線收在框上、現價也還在框上時成立；
+    現價回到框裡＝stand_firm_retest，跌回框下＝stand_firm_lost（回測、框上沒守住）。"""
     if not rng or rng.get("low") is None or rng.get("high") is None:
         return "no_range"
     ev = {e.get("type") for e in (check.get("events") or [])}
-    if check.get("stand_firm", {}).get("ok"):
+    sf = check.get("stand_firm") or {}
+    if sf.get("ok"):
+        side = sf.get("hold_side")
+        if side is None:
+            zone = (rng or {}).get("stand_firm_zone") or [None, None]
+            px = check.get("price")
+            if px is not None and zone[0] is not None:
+                side = "above" if px >= zone[1] else ("in_box" if px >= zone[0] else "lost")
+        if side == "lost":
+            return "stand_firm_lost"
+        if side == "in_box":
+            return "stand_firm_retest"
         return "stand_firm"
     if "stop_break" in ev or (check.get("departed") and check.get("position") == "below"):
         return "invalid"
@@ -1230,6 +1269,20 @@ def render_btc_short(now: datetime, market: dict, rng: dict, check: dict, ma_d: 
             "目標先看最近的密集區，不要看太遠。"
         )
         return (body + ma + macd).strip() + "\n"
+    if st == "stand_firm_retest":
+        z0, z1 = fmt_px(rng["stand_firm_zone"][0]), fmt_px(rng["stand_firm_zone"][1])
+        body = (
+            head + f"日線收在框上，現價回到框裡回測。前高框是 {z0} 到 {z1}："
+            "回測守住、實體沒跌回框下，才繼續偏多，這裡先不追；實體跌回框下就認錯停損。"
+        )
+        return (body + ma + macd).strip() + "\n"
+    if st == "stand_firm_lost":
+        z0, z1 = fmt_px(rng["stand_firm_zone"][0]), fmt_px(rng["stand_firm_zone"][1])
+        body = (
+            head + f"日線雖然收在框上，現價又跌回框下，這是回測、框上沒守住。前高框是 {z0} 到 {z1}："
+            "這裡先不做多，等下一根日線收盤，收回框上才算守住，收在框下就不算站穩。"
+        )
+        return (body + ma + macd).strip() + "\n"
     if st == "lower":
         loc = "已經靠近下沿，可以分批做現貨或小倉多"
     elif st == "upper":
@@ -1257,6 +1310,12 @@ def key_levels_voice(rng: dict, st: str) -> str:
     if st == "stand_firm":
         z0, z1 = fmt_px(rng["stand_firm_zone"][0]), fmt_px(rng["stand_firm_zone"][1])
         return f"前高框 {z0}–{z1}；目標先看最近的密集區；跌回後反手停損看框內"
+    if st == "stand_firm_retest":
+        z0, z1 = fmt_px(rng["stand_firm_zone"][0]), fmt_px(rng["stand_firm_zone"][1])
+        return f"前高框 {z0}–{z1}；現價在框裡回測，守住才偏多"
+    if st == "stand_firm_lost":
+        z0, z1 = fmt_px(rng["stand_firm_zone"][0]), fmt_px(rng["stand_firm_zone"][1])
+        return f"前高框 {z0}–{z1}；回測沒守住，等日線收盤再判"
     batch = batch_levels_text(rng)
     confirm = fmt_px(rng["stand_firm_zone"][1])
     return f"主區間 {lo}–{hi}；分批 {batch}；停損 {stop}；上沿確認到 {confirm}"
@@ -1269,6 +1328,10 @@ def short_direction_voice(st: str, check: dict) -> str:
         return invalid_reason_voice(check)
     if st == "stand_firm":
         return "已經突破並站上框，實體還在框上面就做多；實體跌回框裡就認錯停損，必要時反手。目標先看最近的密集區，不要看太遠。"
+    if st == "stand_firm_retest":
+        return "日線收在框上，現價回到框裡回測；守住、實體沒跌回框下才繼續偏多，這裡先不追，實體跌回框下就認錯停損。"
+    if st == "stand_firm_lost":
+        return "現價跌回框下，這是回測、框上沒守住，先不做多；等下一根日線收盤，收回框上才算守住，收在框下就不算站穩。"
     if st == "lower":
         return "已經靠近下沿，可以分批做現貨或小倉多，停損放在已寫的位置。靠近上沿就減倉；要突破並站穩確認帶，才算轉強。"
     if st == "upper":
@@ -1371,7 +1434,7 @@ def parse_when(s: str | None) -> datetime:
 
 
 def run(out_dir: Path, force_recompute: bool = False, seed: bool = False, market: dict | None = None,
-        price: float | None = None, when: str | None = None) -> dict:
+        price: float | None = None, when: str | None = None, market_file: str | None = None) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     state_path = out_dir / "short_model_state.json"
     now = parse_when(when)
@@ -1381,6 +1444,8 @@ def run(out_dir: Path, force_recompute: bool = False, seed: bool = False, market
     else:
         state = json.loads(state_path.read_text())
 
+    if market is None and market_file:
+        market = json.loads(Path(market_file).read_text())
     if market is None:
         market = fetch_market(skip_ticker=price is not None)
     if price is not None:
@@ -1498,8 +1563,12 @@ def demo_states(out_dir: Path) -> int:
         ("2_mid", {"price": 64655.0, "klines": {}}, rng, chk("mid")),
         ("3_lower", {"price": 61500.0, "klines": {}}, rng, chk("lower_zone")),
         ("4_upper", {"price": 66500.0, "klines": {}}, rng, chk("upper_zone")),
-        ("5_stand_firm", {"price": 67200.0, "klines": {}}, rng, chk("above", True, True, [{"type": "stand_firm"}])),
+        ("5_stand_firm", {"price": 67800.0, "klines": {}}, rng, chk("above", True, True, [{"type": "stand_firm"}])),
         ("6_invalid", {"price": 57000.0, "klines": {}}, rng, chk("below", True, False, [{"type": "stop_break"}, {"type": "depart_below"}])),
+        ("7_stand_firm_retest", {"price": 67300.0, "klines": {}}, rng,
+         {**chk("above", True, True, [{"type": "stand_firm"}]), "stand_firm": {"ok": True, "hold_side": "in_box"}}),
+        ("8_stand_firm_lost", {"price": 66400.0, "klines": {}}, rng,
+         {**chk("above", True, True, [{"type": "stand_firm"}]), "stand_firm": {"ok": True, "hold_side": "lost"}}),
     ]
     failed = 0
     for name, market, r, check in cases:
@@ -1518,6 +1587,8 @@ def demo_states(out_dir: Path) -> int:
             other.append("分批仍寫「以及下沿」，應寫「與下沿」")
         if "4h" in blob or "4H" in blob:
             other.append("仍寫 4h，應寫 4 小時")
+        if name.startswith(("7_", "8_")) and ("站上框" in blob or "突破並站" in blob):
+            other.append("現價不在框上卻寫站上框")
         st = voice_state(check, r)
         status = "PASS" if not errs and not other else "FAIL"
         if status == "FAIL":
@@ -1542,6 +1613,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--demo-states", metavar="DIR", help="用假資料輸出六種狀態樣稿並做數字自檢，不抓盤")
     p.add_argument("--price", type=float, default=None, help="沿用發布標題現價，不再自己抓 ticker")
     p.add_argument("--when", default=None, help="台北時間 YYYY-MM-DD HH:MM，沿用發布標題時間")
+    p.add_argument("--market-file", default=None, help="回測用：讀已存好的 K 線 JSON，不抓盤")
     args = p.parse_args(argv)
     if args.demo_states:
         return demo_states(Path(args.demo_states))
@@ -1552,7 +1624,7 @@ def main(argv: list[str] | None = None) -> int:
     if not when and os.environ.get("BTC_SPOT_WHEN"):
         when = os.environ["BTC_SPOT_WHEN"]
     payload = run(Path(args.out), force_recompute=args.force_recompute, seed=args.seed,
-                  price=price, when=when)
+                  price=price, when=when, market_file=args.market_file)
     chk = payload["check"]
     status = (f"來源 {payload['kline_source']}  現價 {payload['price']:.1f}  "
               f"脫離={chk['departed']}  重算={payload['recomputed']}  "
