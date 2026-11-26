@@ -3,7 +3,7 @@
 Usage: ingest.py <username> <result_file> [...pairs]
 Fetch procedure (via x MCP, not callable from shell): for each top-level account in
 kol_accounts.json call get_users_posts id=<id> ...; also for each aliases[] entry that
-has an id (e.g. XiaoYao_Capital under xy_xtony). Alias posts are tagged owner=<parent>
+has an id. Alias posts are tagged owner=<parent>
 and since_id is updated on the alias object. BTC views always fold into the parent
 analyst row in latest_view.json.
 then run this script."""
