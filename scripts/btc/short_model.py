@@ -17,7 +17,7 @@ K 線：先試幣安現貨 api.binance.com /api/v3/klines（4h／1d／1w）。
 """
 from __future__ import annotations
 
-import argparse, os
+import argparse, os, hashlib
 import json
 import re
 import math
@@ -67,6 +67,37 @@ INIT_STAND_FIRM = [67000.0, 67500.0]
 INIT_RALLY_LOW = 57800.2
 INIT_RALLY_HIGH = 87395.7
 INIT_RECOMPUTE_BAR = "2026-11-16"  # 11/17 結論成立時最後一根已收完日線（台北日期）
+
+# 規則庫同步點（2026-11-23：R79–R92 與既有規則補丁）。每次執行都比對 rules.md 的 hash，
+# 不一致就在 log、狀態行、state 與 short_model_internal.json 標「規則庫已更新，待同步」，不默默跳過。
+# 這些內部標記不進 levels.json、short_model.json（網站、發布程式會讀）。
+RULES_FILE = Path(os.environ.get("BTC_RULES_FILE") or "/workspace/wallstreet-skill/kb/rules.md")
+RULES_REVISION = "2026-11-23/R92"
+RULES_SHA256 = "2be86ca8a1ce1eca75f0baaddad6aa29c37a9c32cb87da7f21f5f41363968fc9"
+RULES_MTIME = "2026-11-23 21:44"
+RULES_STALE_TEXT = "規則庫已更新，待同步"
+RULES_APPLIED = ["R03", "R25", "R79", "R80", "R81", "R87", "R88", "R89", "R90", "R92"]
+RULES_NOT_APPLIED = {"R82": "執行紀律", "R83": "執行紀律", "R84": "不是 BTC", "R86": "不是 BTC",
+                     "R85": "中長線", "R91": "中長線", "待確認": "報告第 5 節 11 項不編碼"}
+REGIME_ER_LEN = 10       # R90：近 10 根日線的效率比，先分震盪或趨勢
+REGIME_ER_TREND = 0.30   # 效率比 >= 0.30 算趨勢，以下算震盪
+RSI_LEN, BOLL_LEN, BOLL_K = 14, 20, 2.0  # R90：預設參數，不擬合
+DUMP_LOOKBACK = 10       # R25：近 10 根日線高點
+DUMP_NO_CHASE_PCT = 0.11 # R25：已經跌約 11% 且還貼著低點，不再追空
+LEFT_MAX_TRIES = 2       # R88：左側最多試兩次
+FALSE_BREAK_BARS = 3     # R80：最近 3 根已收日線內的插針假突破
+DIV_LOOKBACK = 40        # R81：背離只看近 40 根日線的擺動點
+PARABOLIC_BARS = 25      # R89：25 根日線內
+PARABOLIC_RISE = 0.35    # R89：低到高漲 35% 以上算拋物線主升
+MOTHER_BODY_X = 2.0      # R89／R63：大實體＝前 20 根實體中位數的 2 倍
+R89_ACTIVE_BARS = 30     # R89：母線在近 30 根日線內才提
+RULES_MAX_SENTENCES = 3  # /btc 短線段新增的規則句最多 3 句，超過就報錯
+R80_CONFIRM_CLOSES = 2   # R80：熊市裡往上的事件，n＝連續收在該價位上方的已收日線根數；n = 1 觀望、n ≥ 2 重算
+RANGE_MIN_ATR = 1.0      # 重算後主區間最小寬度 W＝max(1.0 × 日線 ATR14, 下沿 × 3%)
+RANGE_MIN_PCT = 0.03
+ATR_LEN = 14
+NEAR_FRAC = 0.30         # 「靠近下沿／上沿」門檻＝區間寬度 × 30%；上沿另以 NEAR_UPPER 為上限
+LEGACY_LEVELS = [INIT_FIB_0886, INIT_VAL, INIT_FIB_0786, INIT_RANGE_HIGH]  # 11/17 那套的已知價位
 
 BINANCE_SPOT = "https://api.binance.com/api/v3"
 def _lic(key, env):
@@ -187,6 +218,11 @@ def fetch_market(limit_4h: int = 500, limit_1d: int = 400, limit_1w: int = 200, 
         d1 = _fetch_binance("1d", limit_1d, now_ms)
         h4 = _fetch_binance("4h", limit_4h, now_ms)
         w1 = _fetch_binance("1w", limit_1w, now_ms)
+        try:
+            h1 = _fetch_binance("1h", 200, now_ms)
+        except Exception as e:
+            h1 = []
+            errors.append(f"binance 1h: {type(e).__name__}: {e}")
         if skip_ticker:
             px = (h4[-1]["close"] if h4 else d1[-1]["close"])
         else:
@@ -195,7 +231,7 @@ def fetch_market(limit_4h: int = 500, limit_1d: int = 400, limit_1w: int = 200, 
             except Exception:
                 px = (h4[-1]["close"] if h4 else d1[-1]["close"])
         return {"source": "binance_spot", "source_note": "幣安現貨 api.binance.com /api/v3/klines",
-                "klines": {"4h": h4, "1d": d1, "1w": w1}, "price": px, "errors": errors}
+                "klines": {"4h": h4, "1d": d1, "1w": w1, "1h": h1}, "price": px, "errors": errors}
     except Exception as e:
         errors.append(f"binance: {type(e).__name__}: {e}")
 
@@ -352,7 +388,8 @@ def macd_view(rows: list[dict]) -> dict:
         "close": last["close"],
     }
     if cross:
-        out["last_cross"] = {"type": cross[0], "time": fmt_time(taipei_of(c[cross[1]]["open_time"]))}
+        out["last_cross"] = {"type": cross[0], "time": fmt_time(taipei_of(c[cross[1]]["open_time"])),
+                             "age": len(c) - 1 - cross[1]}
     if zero:
         out["last_zero"] = {"type": zero[0], "time": fmt_time(taipei_of(c[zero[1]]["open_time"]))}
     return out
@@ -637,7 +674,9 @@ def support_pressure_view(rng: dict, check: dict | None, price: float) -> dict:
     """現價下方（含等於）的已知價位全部是支撐，由近到遠；壓力只取現價上方最近的一檔，上方沒有就不列。"""
     lv = known_levels(rng, check)
     sup = sorted((x for x in lv if x <= price), reverse=True)
-    above = [x for x in lv if x > price]
+    # 分批價是進場價位，不是壓力：現價在區間裡時，上方的分批價不拿來當壓力
+    batch = {float(round(float(x))) for x in (rng.get("lower_supports") or []) if x is not None}
+    above = [x for x in lv if x > price and not (price >= float(rng.get("low") or 0) and x in batch)]
     return {"supports": sup, "pressure": min(above) if above else None}
 
 
@@ -712,7 +751,7 @@ def position_in_range(price: float, rng: dict) -> str:
         return "above"
     if price <= val:
         return "lower_zone"
-    if price >= hi - NEAR_UPPER:
+    if price >= hi - upper_band(rng):
         return "upper_zone"
     return "mid"
 
@@ -745,6 +784,12 @@ def check_state(state: dict, market: dict) -> dict:
     else:
         sf["hold_side"] = None
         sf["fourh_back_below"] = False
+    # R88：回踩的停損至少等 1 小時實體收破框下緣；影線不算。沒有 1h 資料就是 None。
+    h1_rows = market["klines"].get("1h")
+    sf["h1_body_break"] = None
+    if sf["ok"] and h1_rows and last_1d:
+        sf["h1_body_break"] = any(r["close"] < zone[0] for r in closed_bars(h1_rows)
+                                  if r["open_time"] > last_1d["close_time"])
 
     events = []
     departed = False
@@ -847,7 +892,7 @@ def check_state(state: dict, market: dict) -> dict:
     if pos == "lower_zone" or (last_4h and last_4h["low"] <= (rng.get("val") or rng["fib_0886"])) or (last_1d and last_1d["low"] <= (rng.get("val") or rng["fib_0886"])):
         intra.append({"type": "scale_in_zone", "levels": rng["lower_supports"],
                       "note": "已進入或觸及下沿分批區，沿用原劇本，不重算主區間"})
-    if pos == "upper_zone" or (last_4h and last_4h["high"] >= hi - NEAR_UPPER) or (last_1d and last_1d["high"] >= hi - NEAR_UPPER):
+    if pos == "upper_zone" or (last_4h and last_4h["high"] >= hi - upper_band(rng)) or (last_1d and last_1d["high"] >= hi - upper_band(rng)):
         if not sf["ok"]:
             intra.append({"type": "reduce_zone", "level": hi,
                           "note": "已靠近上沿減倉區但尚未站穩，沿用原劇本，不重算主區間"})
@@ -1111,6 +1156,546 @@ def recompute_range_up(market: dict, old_rng: dict, support: list[float], overhe
     }
 
 
+# ---------------------------------------------------------------------------
+# 規則庫 2026-11-23（R03、R25、R79、R80、R81、R87、R88、R89、R90、R92）
+# ---------------------------------------------------------------------------
+def rules_sync_check(prev_state: dict | None = None) -> dict:
+    """比對 rules.md 的 hash。一致＝synced；不一致＝stale（規則庫已更新，待同步）；讀不到＝missing。"""
+    out = {"revision": RULES_REVISION, "sha256_expected": RULES_SHA256, "mtime_expected": RULES_MTIME,
+           "file": str(RULES_FILE)}
+    try:
+        raw = RULES_FILE.read_bytes()
+        mt = datetime.fromtimestamp(RULES_FILE.stat().st_mtime, TAIPEI).strftime("%Y-%m-%d %H:%M")
+    except OSError:
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            # 備援發布（公開 repo 的 Actions）本來就沒有規則庫：註明沿用版本，不寫「待確認」
+            out.update(ok=True, status="no_rules_file_ci", sha256_now=None, mtime_now=None,
+                       flag=None, note=f"這個環境沒有規則庫，沿用 {RULES_REVISION}")
+        else:
+            out.update(ok=False, status="missing", sha256_now=None, mtime_now=None,
+                       flag="規則庫讀不到，無法比對，待確認")
+        return out
+    sha = hashlib.sha256(raw).hexdigest()
+    ok = sha == RULES_SHA256
+    out.update(ok=ok, status="synced" if ok else "stale", sha256_now=sha, mtime_now=mt,
+               flag=None if ok else RULES_STALE_TEXT)
+    seen = (prev_state or {}).get("rules_sha256_seen")
+    out["changed_since_last_run"] = bool(seen and seen != sha)
+    return out
+
+
+_RULES_STATUS: dict = {}
+
+
+def write_rules_internal(out_dir: Path, now: datetime, rs: dict, rv: dict, errs: list[str]) -> None:
+    """內部用：規則同步狀態、規則判斷、用到哪幾句。網站、發布程式、中長線模型都不讀這個檔。"""
+    data = {"generated_at": fmt_time(now), "rules_revision": RULES_REVISION, "rules_sync": rs,
+            "rules": rv, "rules_sentence_check": {"ok": not errs, "max": RULES_MAX_SENTENCES, "errors": errs}}
+    try:
+        (out_dir / "short_model_internal.json").write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+    except OSError:
+        pass
+
+
+def append_rules_log(out_dir: Path, now: datetime, rs: dict) -> None:
+    line = (f"{fmt_time(now)} 規則 {rs['revision']} {rs['status']}"
+            + ("" if rs["ok"] else f" {rs['flag']} 現在 hash {str(rs.get('sha256_now'))[:12]} 修改時間 {rs.get('mtime_now')}")
+            + "\n")
+    try:
+        with open(out_dir / "rules_sync.log", "a", encoding="utf-8") as fh:
+            fh.write(line)
+    except OSError:
+        pass
+
+
+def _rsi(closes: list[float], n: int = RSI_LEN) -> list[float | None]:
+    """Wilder RSI，與 closes 對齊。"""
+    if len(closes) < n + 1:
+        return [None] * len(closes)
+    gains = [max(closes[i] - closes[i - 1], 0.0) for i in range(1, len(closes))]
+    losses = [max(closes[i - 1] - closes[i], 0.0) for i in range(1, len(closes))]
+    ag, al = sum(gains[:n]) / n, sum(losses[:n]) / n
+    val = lambda g, l: 100.0 if l == 0 else 100.0 - 100.0 / (1 + g / l)
+    out: list[float | None] = [None] * n + [val(ag, al)]
+    for i in range(n, len(gains)):
+        ag = (ag * (n - 1) + gains[i]) / n
+        al = (al * (n - 1) + losses[i]) / n
+        out.append(val(ag, al))
+    return out
+
+
+def cycle_view(ma_d: dict | None, cd1: list[dict] | None = None) -> str | None:
+    """R80 的大週期。熊市：已從一年高點跌超過 20%（R04 技術性熊市），或收在 MA120 下方且均線往下。
+    牛市：MA120 往上、收在上方、離一年高點不到 20%。其他不套濾網。"""
+    if not ma_d or not ma_d.get("ok") or ma_d.get("change_5bars") is None:
+        return None
+    top = max(r["high"] for r in cd1[-365:]) if cd1 else None
+    dd = (top - ma_d["close"]) / top if top else 0.0
+    if dd >= DROP_BEAR_PCT or (ma_d["price_below"] and ma_d["change_5bars"] < 0):
+        return "bear"
+    if ma_d["change_5bars"] > 0 and not ma_d["price_below"] and dd < DROP_BEAR_PCT:
+        return "bull"
+    return None
+
+
+def regime_view(cd1: list[dict]) -> dict:
+    """R90：先分震盪或趨勢，震盪時才用 RSI14、布林 20 當高低參考；趨勢裡只提醒鈍化，不逆勢用。"""
+    closes = [r["close"] for r in cd1]
+    if len(closes) < max(REGIME_ER_LEN + 1, BOLL_LEN, RSI_LEN + 1):
+        return {"ok": False}
+    seg = closes[-REGIME_ER_LEN - 1:]
+    net = seg[-1] - seg[0]
+    path = sum(abs(seg[i] - seg[i - 1]) for i in range(1, len(seg)))
+    er = abs(net) / path if path else 0.0
+    kind = "trend" if er >= REGIME_ER_TREND else "range"
+    direction = "down" if net < 0 else "up"
+    rsi = _rsi(closes)[-1]
+    win = closes[-BOLL_LEN:]
+    mid = statistics.mean(win)
+    sd = statistics.pstdev(win)
+    up, dn = mid + BOLL_K * sd, mid - BOLL_K * sd
+    last = closes[-1]
+    signal = None
+    if kind == "range":
+        if rsi >= 70 or last >= up:
+            signal = "overbought"
+        elif rsi <= 30 or last <= dn:
+            signal = "oversold"
+    elif direction == "down" and (rsi <= 30 or last <= dn):
+        signal = "trend_oversold"
+    elif direction == "up" and (rsi >= 70 or last >= up):
+        signal = "trend_overbought"
+    return {"ok": True, "kind": kind, "direction": direction, "er": round(er, 3), "rsi14": round(rsi, 1),
+            "boll20": [round(dn, 1), round(mid, 1), round(up, 1)], "signal": signal}
+
+
+def false_break_view(cd1: list[dict], rng: dict, birth: str | None) -> dict | None:
+    """R80：框成立後最近 3 根已收日線，影線插出上沿（下沿）但收盤收回區間＝假突破（假跌破）。"""
+    lo, hi = rng.get("low"), rng.get("high")
+    if lo is None or hi is None or not cd1:
+        return None
+    recent = [r for r in cd1[-FALSE_BREAK_BARS:] if birth is None or bar_date(r) > birth]
+    if not recent or not (lo <= cd1[-1]["close"] <= hi):
+        return None
+    # 要從區間裡面往外插：開盤在區間內、影線出去、收盤收回；從外面跌回來的那根不算
+    ups = [r for r in recent if r["open"] <= hi and r["high"] > hi and r["close"] <= hi]
+    dns = [r for r in recent if r["open"] >= lo and r["low"] < lo and r["close"] >= lo]
+    if ups and (not dns or ups[-1]["open_time"] >= dns[-1]["open_time"]):
+        return {"side": "up", "level": hi, "extreme": max(r["high"] for r in ups), "bar": bar_date(ups[-1])}
+    if dns:
+        return {"side": "down", "level": lo, "extreme": min(r["low"] for r in dns), "bar": bar_date(dns[-1])}
+    return None
+
+
+def left_tries_view(cd1: list[dict], rng: dict, birth: str | None, price: float) -> int:
+    """R88：框成立後，價格進到下沿分批區（<= 價值區下沿）幾次；連續幾根算同一次，現價正在裡面也算。"""
+    val = rng.get("val") or rng.get("fib_0886") or rng.get("low")
+    if val is None:
+        return 0
+    tries, inside = 0, False
+    after = [r for r in cd1 if birth is None or bar_date(r) > birth]
+    for r in after:
+        touch = r["low"] <= val
+        if touch and not inside:
+            tries += 1
+        inside = touch
+    if price <= val and not inside:
+        tries += 1
+    return tries
+
+
+def dump_view(cd1: list[dict], price: float) -> dict:
+    """R25 補丁／R92 恐慌：從近 10 根日線高點跌了約 11% 以上、而且還貼著低點。"""
+    look = cd1[-DUMP_LOOKBACK:]
+    if not look:
+        return {"on": False}
+    top = max(r["high"] for r in look)
+    low = min(min(r["low"] for r in look), price)
+    drop = (top - price) / top if top else 0.0
+    return {"on": bool(drop >= DUMP_NO_CHASE_PCT and price <= low * 1.03), "drop": round(drop, 4),
+            "top": top, "low": low}
+
+
+def divergence_view(cd1: list[dict]) -> dict | None:
+    """R81：日線 RSI 背離（只用來順勢平倉）。最近兩個擺動高點價高、RSI 低＝頂背離；低點反之＝底背離。"""
+    if len(cd1) < DIV_LOOKBACK + RSI_LEN:
+        return None
+    rsi = _rsi([r["close"] for r in cd1])
+    n = len(cd1)
+    start = n - DIV_LOOKBACK
+    sw = _swings(cd1[start:], 3, 2)
+    idx = {id(r): start + k for k, r in enumerate(cd1[start:])}
+    highs = [idx[id(b)] for t, b in sw if t == "H"]
+    lows = [idx[id(b)] for t, b in sw if t == "L"]
+    found = []
+    if len(highs) >= 2:
+        a, b = highs[-2], highs[-1]
+        if n - 1 - b <= 10 and cd1[b]["high"] > cd1[a]["high"] and rsi[b] is not None and rsi[a] is not None and rsi[b] < rsi[a]:
+            found.append(("top", b))
+    if len(lows) >= 2:
+        a, b = lows[-2], lows[-1]
+        if n - 1 - b <= 10 and cd1[b]["low"] < cd1[a]["low"] and rsi[b] is not None and rsi[a] is not None and rsi[b] > rsi[a]:
+            found.append(("bottom", b))
+    if not found:
+        return None
+    kind, b = max(found, key=lambda x: x[1])
+    return {"kind": kind, "bar": bar_date(cd1[b])}
+
+
+def _body(r: dict) -> tuple[float, float]:
+    return min(r["open"], r["close"]), max(r["open"], r["close"])
+
+
+def double_inside_view(cd1: list[dict]) -> dict | None:
+    """R89（定義見 R63）：拋物線主升後，大實體日線後面至少兩根小實體被包在它的實體內。
+    只看母線在近 30 根日線內；回報下破、回抽實體次數、重心上移。"""
+    n = len(cd1)
+    if n < PARABOLIC_BARS + 25:
+        return None
+    best = None
+    for i in range(max(PARABOLIC_BARS, 20, n - R89_ACTIVE_BARS), n - 2):
+        m = cd1[i]
+        b0, b1 = _body(m)
+        med = statistics.median(abs(x["close"] - x["open"]) for x in cd1[i - 20:i])
+        if not med or b1 - b0 < MOTHER_BODY_X * med:
+            continue
+        w = cd1[i - PARABOLIC_BARS + 1:i + 1]
+        hk = max(range(len(w)), key=lambda k: w[k]["high"])
+        lk = min(range(hk + 1), key=lambda k: w[k]["low"])
+        rise = w[hk]["high"] / w[lk]["low"] - 1 if w[lk]["low"] else 0.0
+        if rise < PARABOLIC_RISE or len(w) - 1 - hk > 3:
+            continue
+        j, group = i + 1, []
+        while j < n and b0 <= _body(cd1[j])[0] and _body(cd1[j])[1] <= b1:
+            group.append(cd1[j])
+            j += 1
+        if len(group) >= 2:
+            best = (i, group, j, rise)
+    if not best:
+        return None
+    i, group, j, rise = best
+    b0, b1 = _body(cd1[i])
+    g_lo = min(_body(r)[0] for r in group)
+    g_hi = max(_body(r)[1] for r in group)
+    rest = cd1[j:]
+    status, retests = "waiting", 0
+    brk = next((k for k, r in enumerate(rest) if r["close"] < g_lo or r["close"] > g_hi), None)
+    if brk is not None:
+        if rest[brk]["close"] > g_hi:
+            status = "broke_up"
+        else:
+            status = "broke_down"
+            after = rest[brk + 1:]
+            inside = False
+            for r in after:
+                touch = r["high"] >= b0
+                if touch and not inside:
+                    retests += 1
+                inside = touch
+            last3 = cd1[-3:]
+            if len(after) >= 3 and all(b0 <= r["close"] <= b1 for r in last3) \
+                    and last3[0]["close"] < last3[1]["close"] < last3[2]["close"]:
+                status = "absorbed"
+    return {"mother": bar_date(cd1[i]), "body": [b0, b1], "group": [g_lo, g_hi], "inside_bars": len(group),
+            "rise": round(rise, 3), "status": status, "retests": retests}
+
+
+def rules_view(market: dict, rng: dict | None, check: dict, ma_d: dict | None) -> dict:
+    cd1 = closed_bars(market["klines"]["1d"])
+    price = market["price"]
+    birth = check.get("recompute_bar")
+    out = {"revision": RULES_REVISION, "applied": RULES_APPLIED, "not_applied": RULES_NOT_APPLIED,
+           "cycle": cycle_view(ma_d, cd1), "regime": regime_view(cd1), "dump": dump_view(cd1, price),
+           "divergence": divergence_view(cd1), "double_inside": double_inside_view(cd1),
+           "false_break": None, "left_tries": 0, "left_exhausted": False}
+    if rng and rng.get("low") is not None:
+        out["false_break"] = false_break_view(cd1, rng, birth)
+        out["left_tries"] = left_tries_view(cd1, rng, birth, price)
+        out["left_exhausted"] = out["left_tries"] > LEFT_MAX_TRIES
+    return out
+
+
+_CN = {1: "一", 2: "兩", 3: "三", 4: "四", 5: "五"}
+
+
+def r03_sentence(macd_d: dict | None, macd_w: dict | None) -> str | None:
+    """R03 補丁：金叉要先看零軸與大週期。只在 /btc 段用，/report 不動。"""
+    if not macd_d or not macd_d.get("ok") or macd_w is None:
+        return None
+    line = macd_d.get("line") or 0
+    cross = macd_d.get("last_cross") or {}
+    if cross.get("type") != "金叉":
+        return None
+    w_line = macd_w.get("line") if macd_w.get("ok") else None
+    age = cross.get("age")
+    if line >= 0 and w_line is not None and w_line < 0:
+        return "週線 MACD 還在零軸下，大跌後的零軸上金叉常常就是反彈的頂，先別追。"
+    if line < 0 and age is not None and age <= 1:
+        return "水下金叉剛出來的頭兩根是反彈最強的時候，手上的多單可以趁這裡減倉。"
+    return None
+
+
+def rules_candidates(st: str, rv: dict | None, check: dict, rng: dict | None,
+                     macd_d: dict | None = None, macd_w: dict | None = None) -> list[tuple[int, str, str, str]]:
+    """當天盤勢觸發到的規則句：(優先順序, 位置 pre/post, 規則, 句子)。數字越小越重要。
+    每句都要跟今天的位置有關才出現；不寫數字參數，避免和價位重複。"""
+    if not rv:
+        return []
+    out: list[tuple[int, str, str, str]] = []
+    cyc = rv.get("cycle")
+    reg = rv.get("regime") or {}
+    fb = rv.get("false_break")
+    dump = rv.get("dump") or {}
+    sf = (check or {}).get("stand_firm") or {}
+    pv_kind = ((check or {}).get("pressure") or {}).get("kind")
+    above_hi = st == "upper" and pv_kind in ("above_edge", "overhead")
+    px = (check or {}).get("price")
+    val = (rng or {}).get("val") or (rng or {}).get("fib_0886") or (rng or {}).get("low")
+    near_batch = st == "lower" or (st == "mid" and px is not None and val is not None
+                                   and float(px) <= float(val) + NEAR_UPPER)
+    left_ok = st == "lower" and not rv.get("left_exhausted") and not dump.get("on")
+    entry = False  # R79：結論可以進場（分批、跟進、假突破反向單）時才提倉位
+    # R88：站穩後回踩的停損、左側最多兩次
+    if st == "stand_firm":
+        out.append((1, "pre", "R88", "突破確認才跟進主倉，回抽守住框可以再加一次；回踩的停損要等 1 小時實體收破框下緣，影線不算。"))
+        entry = True
+    elif st in ("stand_firm_retest", "stand_firm_lost"):
+        hb = sf.get("h1_body_break")
+        if hb is True:
+            out.append((1, "pre", "R88", "1 小時已經實體收破框下緣，手上的多單先停損。"))
+        elif hb is False and st == "stand_firm_lost":
+            out.append((1, "pre", "R88", "1 小時還沒實體收破框下緣，影線不算，先不急著砍。"))
+        else:
+            out.append((1, "pre", "R88", "回踩的停損要等 1 小時實體收破框下緣才算，影線不算。"))
+    elif left_ok:
+        t = rv.get("left_tries") or 0
+        out.append((1, "pre", "R88", "左側只開底倉，最多試兩次" + ("，這已經是第二次，不對就停。" if t == LEFT_MAX_TRIES else "，不對就停。")))
+        entry = True
+    # R80＋R87：假突破不追、高倍等完全脫離區間，合成一句
+    if fb and fb["side"] == "up" and cyc == "bear" and st in ("mid", "upper", "lower"):
+        out.append((2, "pre", "R80/R87", "上沿剛被插針假突破又收回，大週期還在熊市，不追多，反抽上沿附近可以低倍空，"
+                    f"停損放在 {fmt_px(fb['extreme'])} 上方；高倍要等日線完全脫離區間才追。"))
+        entry = True
+    elif fb and fb["side"] == "down" and cyc == "bull" and st in ("mid", "upper", "lower"):
+        out.append((2, "pre", "R80/R87", "下沿剛被插針假跌破又收回，大週期偏多，不追空，下沿附近可以低倍做多，"
+                    f"停損放在 {fmt_px(fb['extreme'])} 下方；高倍要等日線完全脫離區間才追。"))
+        entry = True
+    elif st == "upper" and cyc == "bear":
+        where = "上沿上方先當假突破看" if above_hi else "靠近上沿先防假突破"
+        out.append((2, "pre", "R80/R87", f"大週期還在熊市，{where}，不追多；高倍要等日線完全脫離區間、站穩以後才追。"))
+    elif st == "upper":
+        out.append((2, "pre", "R87", "高倍要等日線完全脫離區間、站穩以後才追，停損放回區間內。"))
+    elif st in ("stand_firm", "stand_firm_retest") and cyc == "bear":
+        out.append((2, "pre", "R80", "大週期還在熊市，這種突破先防假突破，多單只用低倍小倉。"))
+    elif st == "invalid" and cyc == "bull":
+        out.append((2, "pre", "R80", "大週期還在牛市，下沿跌破先當假的看，不追空。"))
+    elif st == "mid" and reg.get("kind") == "range":
+        out.append((2, "pre", "R87", "區間還在震盪，不要來回做；高倍要等日線完全脫離區間再追。"))
+    # R25 補丁：已經大跌約 11% 不再追空
+    if dump.get("on") and st in ("invalid", "lower", "stand_firm_lost", "no_range"):
+        out.append((3, "pre", "R25", "已經從近期高點跌了一成多，不再追空；等止跌、走出一段震盪，再找反彈的次高點空。"))
+    # R92：分批不預掛滿，只在現價靠近分批區時寫
+    if near_batch and not rv.get("left_exhausted"):
+        if dump.get("on"):
+            out.append((4, "pre", "R92", "恐慌時價值區下沿也可能直接被打穿。"))
+        else:
+            out.append((4, "pre", "R92", "分批不要一次先掛滿，恐慌時可能直接打穿，看到止跌反應再接。"))
+    # R89 拋物線後日線雙孕線
+    di = rv.get("double_inside") or {}
+    s = di.get("status")
+    r89 = {
+        "waiting": "拋物線上漲後日線出現雙孕線，等收盤破小實體群哪一邊再跟。",
+        "broke_up": "拋物線上漲後的日線雙孕線往上破，空單不做。",
+        "absorbed": "價格一直圍著雙孕線實體、重心往上移，拋壓被吸收，空單放棄。",
+    }.get(s)
+    if s == "broke_down":
+        n = di.get("retests") or 0
+        if n == 0:
+            r89 = "拋物線上漲後的日線雙孕線已經往下破，空單順勢拿；跌到位以後，回到雙孕線實體附近可以再空。"
+        elif n <= 2:
+            r89 = f"雙孕線往下破之後已經回抽實體{_CN[n]}次，前兩次回抽都可以空，第三次就不做。"
+        else:
+            r89 = "雙孕線實體已經被回測第三次以上，結構可能變了，不再空。"
+    if r89:
+        out.append((5, "post", "R89", r89))
+    # R81 背離只順勢平倉：手上有對應方向的單才有關
+    dv = (rv.get("divergence") or {}).get("kind")
+    if dv == "top" and st in ("upper", "stand_firm", "stand_firm_retest"):
+        out.append((6, "post", "R81", "日線出現頂背離，只拿來讓手上的多單減倉，不拿來摸頂做空。"))
+    elif dv == "bottom" and st in ("lower", "invalid", "no_range", "stand_firm_lost"):
+        out.append((6, "post", "R81", "日線出現底背離，只拿來讓手上的空單減倉，不拿來抄底。"))
+    # R03 補丁
+    r03 = r03_sentence(macd_d, macd_w)
+    if r03:
+        out.append((7, "post", "R03", r03))
+    # R90：RSI／布林只在相關位置提
+    sig = reg.get("signal")
+    near_top = st == "upper"
+    if sig == "overbought" and near_top:
+        out.append((8, "post", "R90", "現在是震盪盤，日線 RSI 或布林通道已經到超買那一側，可以當上沿附近減倉的參考。"))
+    elif sig == "oversold" and near_batch:
+        out.append((8, "post", "R90", "現在是震盪盤，日線 RSI 或布林通道已經到超賣那一側，可以當下沿附近分批的參考。"))
+    elif sig == "trend_oversold" and st in ("lower", "invalid", "no_range", "stand_firm_lost"):
+        out.append((8, "post", "R90", "現在是下跌趨勢，RSI 超賣會一直鈍化，不拿來抄底。"))
+    elif sig == "trend_overbought" and st in ("upper", "stand_firm", "stand_firm_retest"):
+        out.append((8, "post", "R90", "現在是上漲趨勢，RSI 超買會一直鈍化，不拿來摸頂。"))
+    # R79：結論可以進場或追進時才提倉位
+    if entry:
+        out.append((9, "post", "R79", "單筆別超過總資金一成，大多數時間空倉也沒關係，賺了先提出來。"))
+    return out
+
+
+def rules_sentences(st: str, rv: dict | None, check: dict, rng: dict | None,
+                    macd_d: dict | None = None, macd_w: dict | None = None) -> tuple[str, str, list[str]]:
+    """依優先順序最多取 RULES_MAX_SENTENCES 句。回傳 (接在結論後, 接在 MACD 後, 用到的規則)。"""
+    cand = sorted(rules_candidates(st, rv, check, rng, macd_d, macd_w), key=lambda x: x[0])
+    pick = cand[:RULES_MAX_SENTENCES]
+    if rv is not None:
+        rv["sentences_all"] = [c[3] for c in cand]
+        rv["sentences_used"] = [c[2] for c in pick]
+        rv["sentences_dropped"] = [c[2] for c in cand[RULES_MAX_SENTENCES:]]
+    pre = "".join(c[3] for c in pick if c[1] == "pre")
+    post = "".join(c[3] for c in pick if c[1] == "post")
+    return pre, post, [c[2] for c in pick]
+
+
+def rules_sentence_errors(text: str, rv: dict | None) -> list[str]:
+    """自檢：輸出裡實際出現的規則句超過 RULES_MAX_SENTENCES 就報錯。"""
+    if not rv:
+        return []
+    n = sum(text.count(x) for x in rv.get("sentences_all") or [])
+    if n > RULES_MAX_SENTENCES:
+        return [f"執行失敗：/btc 短線段新增規則句 {n} 句，超過上限 {RULES_MAX_SENTENCES} 句"]
+    return []
+
+
+# ---------------------------------------------------------------------------
+# 11/26 Manager 08:01：R80 收回還沒確認、主區間最小寬度、分批價和壓力分開、靠近門檻跟寬度成比例
+# ---------------------------------------------------------------------------
+def r80_reclaim_gate(check: dict, market: dict, ma_d: dict | None) -> dict | None:
+    """R80：大週期是熊市時，往上的事件（收回上方壓力、收在上沿上方、站上確認帶）先當假突破看。
+    L＝事件的價位（收回壓力＝那道壓力；脫離上沿＝上沿；站穩＝確認帶下緣）。
+    n＝從最新一根已收日線往回數，連續收在 L 上方的根數（站穩用 >=，其他用 >）。
+    n = 1 → 收回還沒確認：不重算主區間，方向最多觀望／不追。
+    n ≥ 2（R80_CONFIRM_CLOSES）→ 延續確認（第二根也收在上方；中間回踩到 L 附近沒收破也算回踩不破）→ 照原流程往上重算。
+    n = 0 只會在事件是更早的日線觸發、最新一根已收回 L 下方時出現，同樣不重算（等同假突破）。
+    程式寫法：n >= R80_CONFIRM_CLOSES 才放行；其餘（n = 1，或 n = 0）攔下。
+    牛市或大週期不明確：不攔，照原流程。"""
+    evs = check.get("events") or []
+    if any(e.get("type") in ("depart_below", "stop_break") for e in evs):
+        return None
+    ups = [e for e in evs if e.get("type") in ("reclaim_overhead", "depart_above", "stand_firm")]
+    if not ups:
+        return None
+    cd1 = closed_bars(market["klines"]["1d"])
+    cyc = cycle_view(ma_d, cd1)
+    if cyc != "bear" or not cd1:
+        return None
+    lvl = lambda e: float(e["zone"][0]) if e["type"] == "stand_firm" else float(e["level"])
+    e = max(ups, key=lvl)
+    L = lvl(e)
+    n = 0
+    for r in reversed(cd1):
+        if (r["close"] >= L) if e["type"] == "stand_firm" else (r["close"] > L):
+            n += 1
+        else:
+            break
+    if n >= R80_CONFIRM_CLOSES:
+        return None
+    last = cd1[-1]
+    return {"level": L, "event": e["type"], "close": last["close"], "bar": bar_date(last),
+            "closes_above": n, "need": R80_CONFIRM_CLOSES, "cycle": cyc,
+            "rule": "熊市裡往上的事件，要連續兩根已收日線收在該價位上方才算延續確認；只有一根算收回還沒確認，不重算主區間"}
+
+
+def _atr(cd1: list[dict], n: int = ATR_LEN) -> float | None:
+    """日線 ATR14（Wilder），只用已收完日線。"""
+    if len(cd1) < n + 1:
+        return None
+    tr = [max(cd1[i]["high"] - cd1[i]["low"], abs(cd1[i]["high"] - cd1[i - 1]["close"]),
+              abs(cd1[i]["low"] - cd1[i - 1]["close"])) for i in range(1, len(cd1))]
+    a = sum(tr[:n]) / n
+    for t in tr[n:]:
+        a = (a * (n - 1) + t) / n
+    return a
+
+
+def range_min_width(market: dict, lo: float) -> tuple[float, float | None]:
+    """最小寬度 W＝max(RANGE_MIN_ATR × 日線 ATR14, RANGE_MIN_PCT × 下沿)。"""
+    atr = _atr(closed_bars(market["klines"]["1d"]))
+    return max(RANGE_MIN_ATR * atr if atr else 0.0, RANGE_MIN_PCT * float(lo)), atr
+
+
+def enforce_min_width(rng: dict, market: dict, overhead: list[float]) -> dict:
+    """重算出來的區間寬度不到 W：上沿往上取「下沿＋W」以上最近的已知壓力。
+    候選：重算時的上沿參考價、跌破後記下的壓力、11/17 那套的 61,174／61,800／64,134／67,000、
+    近 10 根日線高點與近 120 根日線擺動高點（落到千位）。都沒有才取下沿＋W 往上的千位整數。"""
+    rng = dict(rng)
+    lo, hi = float(rng["low"]), float(rng["high"])
+    w, atr = range_min_width(market, lo)
+    info = {"atr14": round(atr, 1) if atr else None, "min_width": round(w, 1), "width_before": round(hi - lo, 1),
+            "formula": f"W = max({RANGE_MIN_ATR} × ATR14, {RANGE_MIN_PCT} × 下沿)", "widened": False}
+    if hi - lo >= w:
+        rng["min_width"] = info
+        return rng
+    target = lo + w
+    cd1 = closed_bars(market["klines"]["1d"])
+    cands = {float(round(float(x))) for x in list(rng.get("upper_refs") or []) + list(overhead) + LEGACY_LEVELS}
+    for bar in cd1[-10:]:
+        cands.add(float(math.floor(bar["high"] / UPPER_ROUND) * UPPER_ROUND))
+    for typ, bar in _swings(cd1[-120:]):
+        if typ == "H":
+            cands.add(float(math.floor(bar["high"] / UPPER_ROUND) * UPPER_ROUND))
+    above = sorted(x for x in cands if x >= target)
+    new_hi = above[0] if above else float(math.ceil(target / UPPER_ROUND) * UPPER_ROUND)
+    info.update(widened=True, high_before=hi, high_after=new_hi, target=round(target, 1), candidates=above[:6])
+    rng.update(high=new_hi, stand_firm_zone=[new_hi, new_hi + STAND_FIRM_BAND],
+               upper_refs=sorted({float(x) for x in (rng.get("upper_refs") or [])} | {new_hi}),
+               high_former_low=new_hi in {float(x) for x in overhead}, min_width=info)
+    rng["note"] = (rng.get("note") or "") + f"；寬度 {fmt_px(hi - lo)} 不到最小寬度 {fmt_px(w)}，上沿改取 {fmt_px(new_hi)}"
+    return rng
+
+
+def upper_band(rng: dict) -> float:
+    """「靠近上沿」門檻：區間寬度 × NEAR_FRAC，最多 NEAR_UPPER。"""
+    return min(float(NEAR_UPPER), NEAR_FRAC * (float(rng["high"]) - float(rng["low"])))
+
+
+def near_lower_edge(price, rng: dict) -> bool:
+    """「靠近下沿」：現價離下沿不到區間寬度 × NEAR_FRAC。分批區（<= 價值區下沿）裡但離下沿還遠，就寫「進到分批區」。"""
+    if price is None:
+        return True
+    return float(price) - float(rng["low"]) <= NEAR_FRAC * (float(rng["high"]) - float(rng["low"]))
+
+
+def lower_word(check: dict | None, rng: dict) -> str:
+    return "已經靠近下沿" if near_lower_edge((check or {}).get("price"), rng) else "已經進到分批區"
+
+
+def level_role_errors(rng: dict, sp: dict, price: float, *texts: str) -> list[str]:
+    """自檢（中止）：分批價同時是壓力；不靠近卻寫「已經靠近下沿／上沿」；重算出來的區間比最小寬度窄。"""
+    errs = []
+    lo, hi = float(rng["low"]), float(rng["high"])
+    batch = {float(round(float(x))) for x in (rng.get("lower_supports") or []) if x is not None}
+    if price >= lo:
+        p = sp.get("pressure")
+        if p is not None and float(round(float(p))) in batch:
+            errs.append(f"執行失敗：{fmt_px(p)} 同時是分批價和壓力")
+        near, nxt = text_pressures(*texts)
+        for x in near + nxt:
+            if float(x.replace(",", "")) in batch:
+                errs.append(f"執行失敗：文字把分批價 {x} 寫成壓力")
+    for t in texts:
+        if "已經靠近下沿" in t and not near_lower_edge(price, rng):
+            errs.append("執行失敗：現價離下沿超過區間寬度的門檻，卻寫成靠近下沿")
+        if "已經靠近上沿" in t and not (0 <= hi - price <= upper_band(rng)):
+            errs.append("執行失敗：現價離上沿超過區間寬度的門檻，卻寫成靠近上沿")
+    mw = rng.get("min_width") or {}
+    if mw.get("min_width") and hi - lo < float(mw["min_width"]) - 0.5:
+        errs.append(f"執行失敗：主區間寬度 {fmt_px(hi - lo)} 小於最小寬度 {fmt_px(mw['min_width'])}")
+    return list(dict.fromkeys(errs))
+
+
 def scenarios_from_range(rng: dict) -> list[dict]:
     lo, hi = rng["low"], rng["high"]
     stop = rng["final_stop"]
@@ -1356,6 +1941,9 @@ def bias_line(check: dict, rng: dict, ma_d: dict) -> tuple[str, str, str]:
     st = voice_state(check, rng)
     stop = fmt_px(rng["final_stop"]) if rng and rng.get("final_stop") is not None else ""
     invalid = f"日線收盤跌破停損{(' ' + stop) if stop else ''}" if st != "invalid" else "這套已作廢，要重算"
+    if st == "reclaim_pending":
+        lv_ = fmt_px(check["reclaim_pending"]["level"])
+        return ("觀望", "日線只收回一根，大週期還在熊市，先當假突破看，不追", f"日線收回 {lv_} 下方就當假突破")
     if st == "stand_firm":
         return ("偏多", "已經突破並站上框，實體還在框上面就做多", "實體跌回框裡就認錯停損")
     if st == "stand_firm_retest":
@@ -1365,7 +1953,7 @@ def bias_line(check: dict, rng: dict, ma_d: dict) -> tuple[str, str, str]:
     if st == "invalid":
         return ("觀望", "這套已作廢，認錯離場", invalid)
     if st == "lower":
-        return ("偏多", "已經靠近下沿，可以分批做現貨或小倉多", invalid)
+        return ("偏多", lower_word(check, rng) + "，可以分批做現貨或小倉多", invalid)
     if st == "upper":
         kind = ((check or {}).get("pressure") or {}).get("kind")
         if kind == "overhead":
@@ -1384,6 +1972,8 @@ def voice_state(check: dict, rng: dict | None) -> str:
     現價回到框裡＝stand_firm_retest，跌回框下＝stand_firm_lost（回測、框上沒守住）。"""
     if not rng or rng.get("low") is None or rng.get("high") is None:
         return "no_range"
+    if (check or {}).get("reclaim_pending"):
+        return "reclaim_pending"
     ev = {e.get("type") for e in (check.get("events") or [])}
     sf = check.get("stand_firm") or {}
     if sf.get("ok"):
@@ -1505,13 +2095,15 @@ def invalid_reason_voice(check: dict) -> str:
     return "這套已作廢，認錯離場，接下來要重算。"
 
 
-def render_btc_short(now: datetime, market: dict, rng: dict, check: dict, ma_d: dict, ma_w: dict, macd_d: dict, macd_4: dict, scenarios: list[dict]) -> str:
+def render_btc_short(now: datetime, market: dict, rng: dict, check: dict, ma_d: dict, ma_w: dict, macd_d: dict, macd_4: dict, scenarios: list[dict],
+                     rv: dict | None = None, macd_w: dict | None = None) -> str:
     """一段連貫文字：不加摘要行、不加劇本行，每個價位只出現一次。"""
     price = market["price"]
     st = voice_state(check, rng)
     time_s = fmt_time_text(now)
-    ma = ma120_voice(ma_d, "btc")
-    macd = macd_voice(macd_d, macd_4, "btc")
+    r_pre, r_post, _r_used = rules_sentences(st, rv, check, rng, macd_d, macd_w)
+    ma = r_pre + ma120_voice(ma_d, "btc")
+    macd = macd_voice(macd_d, macd_4, "btc") + r_post
     probe = probe_voice(check)
     head = f"現價 {fmt_px(price)}，{time_s}，"
     if st == "no_range":
@@ -1525,6 +2117,17 @@ def render_btc_short(now: datetime, market: dict, rng: dict, check: dict, ma_d: 
     stop = fmt_px(rng["final_stop"])
     batch = batch_levels_text(rng)
     confirm = fmt_px(rng["stand_firm_zone"][1])
+    if st == "reclaim_pending":
+        pd = check["reclaim_pending"]
+        back = check.get("price") is not None and float(check["price"]) < float(pd["level"])
+        body = (head + f"日線收回 {fmt_px(pd['level'])} 上方，但大週期還在熊市，只收回一根"
+                + ("，現價又回到這個價位下方" if back else "") + "，先當假突破看，不追。"
+                "要再一根日線收在這個價位上方，或回踩不破，才算轉強；日線收回下方就當假突破。")
+        if abs(float(pd["level"]) - float(rng["high"])) < 0.51:
+            body += f"主區間先不重算，下沿 {lo}，停損 {stop}。"
+        else:
+            body += f"主區間先不重算，還是 {lo} 到 {hi}，停損 {stop}。"
+        return (body + ma + macd).strip() + "\n"
     if st == "invalid":
         body = head + invalid_reason_voice(check)
         body += f"原主區間是 {lo} 到 {hi}，原停損 {stop}。"
@@ -1553,8 +2156,12 @@ def render_btc_short(now: datetime, market: dict, rng: dict, check: dict, ma_d: 
         return (body + ma + macd).strip() + "\n"
     if st == "upper":
         return (upper_btc_body(head, rng, check, lo, hi, stop, batch, confirm) + ma + macd + probe).strip() + "\n"
-    if st == "lower":
-        loc = "已經靠近下沿，可以分批做現貨或小倉多"
+    if st == "lower" and (rv or {}).get("left_exhausted"):
+        loc = lower_word(check, rng) + "，但左側已經試過兩次，這次先不接，等站回來再說"
+    elif st == "lower" and ((rv or {}).get("dump") or {}).get("on"):
+        loc = "已經跌進下沿分批區，但現在是恐慌急跌，分批先不預掛，看到止跌反應再接"
+    elif st == "lower":
+        loc = lower_word(check, rng) + "，可以分批做現貨或小倉多"
     elif st == "upper":
         loc = "已經靠近上沿，這裡先減倉，不要追多"
     else:
@@ -1625,6 +2232,11 @@ def key_levels_voice(rng: dict, st: str, check: dict | None = None) -> str:
     stop = fmt_px(rng["final_stop"])
     if st == "invalid":
         return f"原主區間 {lo}–{hi}；原停損 {stop}"
+    if st == "reclaim_pending":
+        pl = (check or {}).get("reclaim_pending") or {}
+        if abs(float(pl.get("level", 0)) - float(rng["high"])) < 0.51:
+            return f"主區間 {lo}–{hi}；收回還沒確認；停損 {stop}"
+        return f"收回還沒確認 {fmt_px(pl.get('level', 0))}；主區間 {lo}–{hi}；停損 {stop}"
     if st == "stand_firm":
         z0, z1 = fmt_px(rng["stand_firm_zone"][0]), fmt_px(rng["stand_firm_zone"][1])
         return f"前高框 {z0}–{z1}；目標先看最近的密集區；跌回後反手停損看框內"
@@ -1652,6 +2264,8 @@ def short_direction_voice(st: str, check: dict) -> str:
         return "還在急跌，先等日線長下影收回，或連續至少 3 根日線橫盤、最後一根不再創新低，再定區間；停頓前，不抄底、也不追空。"
     if st == "invalid":
         return invalid_reason_voice(check)
+    if st == "reclaim_pending":
+        return "日線收回這道價位，但大週期還在熊市、只收回一根，先當假突破看，不追；要再一根日線收在這道價位上方，或回踩不破，才算轉強。"
     if st == "stand_firm":
         return "已經突破並站上框，實體還在框上面就做多；實體跌回框裡就認錯停損，必要時反手。目標先看最近的密集區，不要看太遠。"
     if st == "stand_firm_retest":
@@ -1659,7 +2273,7 @@ def short_direction_voice(st: str, check: dict) -> str:
     if st == "stand_firm_lost":
         return "現價跌回框下，這是回測、框上沒守住，先不做多；等下一根日線收盤，收回框上才算守住，收在框下就不算站穩。"
     if st == "lower":
-        return "已經靠近下沿，可以分批做現貨或小倉多，停損放在已寫的位置。靠近上沿就減倉；要突破並站穩確認帶，才算轉強。"
+        return ("已經靠近下沿" if (check or {}).get("near_lower_edge", True) else "已經進到分批區") + "，可以分批做現貨或小倉多，停損放在已寫的位置。靠近上沿就減倉；要突破並站穩確認帶，才算轉強。"
     if st == "upper":
         pv = (check or {}).get("pressure") or {"kind": "edge"}
         if pv.get("kind") == "overhead" and pv.get("in_confirm"):
@@ -1805,6 +2419,18 @@ def run(out_dir: Path, force_recompute: bool = False, seed: bool = False, market
     if state.get("overhead_levels") is None:
         state["overhead_levels"] = check.get("overhead_levels") or []
     did_recompute = False
+    # R80：熊市裡只有一根日線往上收，算收回還沒確認，不重算主區間
+    _gate = None if force_recompute else r80_reclaim_gate(check, market, ma_d)
+    if _gate:
+        check["reclaim_pending"] = _gate
+        check["events_pending"] = check.get("events") or []
+        check["events"] = []
+        check["recompute"] = False
+        check["departed"] = False
+        if check.get("position") == "above":
+            check["position"] = "upper_zone"
+        check["reason_text"] = (f"日線收盤 {fmt_px(_gate['close'], 1)} 由下往上收回 {fmt_px(_gate['level'])}，"
+                                f"但大週期還在熊市、連續收在上方只有 {_gate['closes_above']} 根，算收回還沒確認，主區間先不重算")
     if force_recompute or check["recompute"]:
         reason = check["reason_text"] if check["recompute"] else "手動強制重算"
         ev_types = {e.get("type") for e in check.get("events") or []}
@@ -1829,6 +2455,7 @@ def run(out_dir: Path, force_recompute: bool = False, seed: bool = False, market
             new_rng.update(direction="down", broken_zone=None, high_former_low=False)
             if ev_types & {"depart_below", "stop_break"} and old_rng.get("low") is not None:
                 overhead = sorted(set(overhead) | {float(old_rng["low"])})
+        new_rng = enforce_min_width(new_rng, market, overhead)
         state["overhead_levels"] = [x for x in overhead if x > new_rng["high"]]
         state["main_range"] = {**state.get("main_range", {}), **new_rng}
         state["scenarios"] = scenarios_from_range(state["main_range"])
@@ -1840,11 +2467,12 @@ def run(out_dir: Path, force_recompute: bool = False, seed: bool = False, market
         check = check_state(state, market)
         check["departed"] = True if not force_recompute else check["departed"]
         check["recompute"] = True
-        if force_recompute and not check.get("reason_text"):
-            check["reason_text"] = reason
+        check["after_recompute_note"] = check.get("reason_text")
+        check["reason_text"] = ("已重算主區間：" + reason) if not force_recompute else "手動強制重算主區間"
 
     state["scenarios"] = update_scenario_status(state["scenarios"], check)
     rng = state["main_range"]
+    check["near_lower_edge"] = near_lower_edge(market["price"], rng)
 
     payload = {
         "generated_at": fmt_time(now),
@@ -1862,13 +2490,28 @@ def run(out_dir: Path, force_recompute: bool = False, seed: bool = False, market
         "last_recompute_bar": state.get("last_recompute_bar"),
         "origin": state.get("origin"),
     }
-    btc_txt = render_btc_short(now, market, rng, check, ma_d, ma_w, macd_d, macd_4, state["scenarios"])
+    macd_w = macd_view(market["klines"]["1w"]) if market["klines"].get("1w") else {"ok": False}
+    payload["macd"]["1w"] = macd_w
+    rv = rules_view(market, rng, check, ma_d)
+    rs = rules_sync_check(state)
+    _RULES_STATUS.clear()
+    _RULES_STATUS.update(rs)
+    append_rules_log(out_dir, now, rs)
+    if not rs["ok"]:
+        print(f"[規則] {rs['flag']}：程式同步到 {RULES_REVISION}，rules.md 現在 hash {str(rs.get('sha256_now'))[:12]}、修改時間 {rs.get('mtime_now')}",
+              file=sys.stderr)
+    btc_txt = render_btc_short(now, market, rng, check, ma_d, ma_w, macd_d, macd_4, state["scenarios"], rv=rv, macd_w=macd_w)
+    rules_errs = rules_sentence_errors(btc_txt, rv)
     report_txt = render_report(now, market, rng, check, ma_d, macd_d, macd_4)
     slim_txt = render_report_slim(now, market, rng, check, ma_d, macd_d, macd_4)
     forecast_short = "【短線】\n" + btc_txt
     if not forecast_short.endswith("\n"):
         forecast_short += "\n"
     direction, target, invalid = bias_line(check, rng, ma_d)
+    if rv.get("left_exhausted") and voice_state(check, rng) == "lower":  # R88：左側第三次不接
+        direction, target = "觀望", "左側已經試過兩次，這次先不接，等站回來再說"
+    elif (rv.get("dump") or {}).get("on") and voice_state(check, rng) == "lower":  # R92：恐慌時不預掛
+        direction, target = "觀望", "恐慌急跌，分批先不預掛，看到止跌反應再接"
     px_f = float(market["price"])
     sp_view = support_pressure_view(rng, check, px_f)
     warns = []
@@ -1898,6 +2541,8 @@ def run(out_dir: Path, force_recompute: bool = False, seed: bool = False, market
     # 中止的只有：數字重複、支撐壓力放錯邊。中止時不寫任何輸出檔，發布端會看到失敗並標記沿用舊段。
     uniq_errs = unique_number_errors(("/btc 短線段", btc_txt), ("report_slim.txt", slim_txt))
     uniq_errs += support_pressure_errors(sp_view, px_f, sp_text)
+    uniq_errs += rules_errs
+    uniq_errs += level_role_errors(rng, sp_view, px_f, btc_txt, slim_txt, levels["watch"])
     payload["unique_check"] = {"ok": not uniq_errs, "errors": uniq_errs}
     if uniq_errs:
         for e in uniq_errs:
@@ -1915,6 +2560,7 @@ def run(out_dir: Path, force_recompute: bool = False, seed: bool = False, market
     (out_dir / "report_slim.txt").write_text(slim_txt)
     (out_dir / "forecast_short.txt").write_text(forecast_short)
     (out_dir / "levels.json").write_text(json.dumps(levels, ensure_ascii=False) + "\n")
+    write_rules_internal(out_dir, now, rs, rv, rules_errs)
     # 狀態檔只保留劇本與主區間，供隔日比對；不把每次現價寫死成新劇本
     persist = {
         "version": state.get("version", 1),
@@ -1924,6 +2570,10 @@ def run(out_dir: Path, force_recompute: bool = False, seed: bool = False, market
         "last_recompute_reason": state.get("last_recompute_reason"),
         "last_recompute_bar": state.get("last_recompute_bar"),
         "overhead_levels": state.get("overhead_levels") or [],
+        "rules_revision": RULES_REVISION,
+        "rules_sha256": RULES_SHA256,
+        "rules_sha256_seen": rs.get("sha256_now"),
+        "rules_sync_status": rs["status"],
         "updated_at": fmt_time(now),
     }
     state_path.write_text(json.dumps(persist, ensure_ascii=False, indent=2) + "\n")
@@ -1964,9 +2614,33 @@ def demo_states(out_dir: Path) -> int:
         ("8_stand_firm_lost", {"price": 66400.0, "klines": {}}, rng,
          {**chk("above", True, True, [{"type": "stand_firm"}]), "stand_firm": {"ok": True, "hold_side": "lost"}}),
     ]
+    rv0 = {"cycle": "bear", "regime": {"ok": True, "kind": "trend", "direction": "down", "signal": None},
+           "dump": {"on": False}, "false_break": None, "left_tries": 0, "left_exhausted": False,
+           "divergence": None, "double_inside": None}
+    rvs = {name: rv0 for name, *_ in cases}
+    rule_cases = [
+        ("9_r80_false_break", {"price": 66300.0, "klines": {}}, rng, chk("upper_zone"),
+         {**rv0, "false_break": {"side": "up", "extreme": 67420.0}}),
+        ("10_r87_range_mid", {"price": 64655.0, "klines": {}}, rng, chk("mid"),
+         {**rv0, "regime": {"ok": True, "kind": "range", "signal": "oversold"}}),
+        ("11_r88_left_third", {"price": 61500.0, "klines": {}}, rng, chk("lower_zone"),
+         {**rv0, "left_tries": 3, "left_exhausted": True}),
+        ("12_r92_r25_panic", {"price": 59500.0, "klines": {}}, rng, chk("lower_zone"),
+         {**rv0, "dump": {"on": True}, "left_tries": 1, "regime": {"ok": True, "kind": "trend", "direction": "down", "signal": "trend_oversold"}}),
+        ("13_r88_h1_lost", {"price": 66400.0, "klines": {}}, rng,
+         {**chk("above", True, True, [{"type": "stand_firm"}]), "stand_firm": {"ok": True, "hold_side": "lost", "h1_body_break": True}}, rv0),
+        ("14_r81_r89", {"price": 64655.0, "klines": {}}, rng, chk("mid"),
+         {**rv0, "divergence": {"kind": "bottom"}, "double_inside": {"status": "broke_down", "retests": 1}}),
+        ("15_cap_six_rules", {"price": 61500.0, "klines": {}}, rng, chk("lower_zone"),
+         {**rv0, "regime": {"ok": True, "kind": "range", "signal": "oversold"}, "divergence": {"kind": "bottom"},
+          "double_inside": {"status": "broke_down", "retests": 1}}),
+    ]
+    for name, market, r, check, rv in rule_cases:
+        cases.append((name, market, r, check))
+        rvs[name] = rv
     failed = 0
     for name, market, r, check in cases:
-        btc = render_btc_short(now, market, r, check, ma_d, {}, macd_d, macd_4, [])
+        btc = render_btc_short(now, market, r, check, ma_d, {}, macd_d, macd_4, [], rv=rvs[name], macd_w={"ok": True, "line": -500})
         slim = render_report_slim(now, market, r, check, ma_d, macd_d, macd_4)
         (out_dir / f"{name}_btc.txt").write_text(btc)
         (out_dir / f"{name}_slim.txt").write_text(slim)
@@ -1985,6 +2659,10 @@ def demo_states(out_dir: Path) -> int:
             other.append("仍有週期標籤")
         if "以及下沿" in blob:
             other.append("分批仍寫「以及下沿」，應寫「與下沿」")
+        other += rules_sentence_errors(btc, rvs.get(name))
+        for bad in ("OKX", "CryptoQuant", "CQ", "已移除", "來源", "http", "@"):
+            if bad in blob:
+                other.append(f"出現「{bad}」")
         if "4h" in blob or "4H" in blob:
             other.append("仍寫 4h，應寫 4 小時")
         if name.startswith(("7_", "8_")) and ("站上框" in blob or "突破並站" in blob):
@@ -2028,7 +2706,8 @@ def main(argv: list[str] | None = None) -> int:
     chk = payload["check"]
     status = (f"來源 {payload['kline_source']}  現價 {payload['price']:.1f}  "
               f"脫離={chk['departed']}  重算={payload['recomputed']}  "
-              f"位置={chk['position']}")
+              f"位置={chk['position']}  "
+              f"規則={(_RULES_STATUS.get('note') or ('已同步 ' + RULES_REVISION)) if _RULES_STATUS.get('ok') else _RULES_STATUS.get('flag')}")
     if args.forecast_short:
         print(status, file=sys.stderr)
         print(chk["reason_text"], file=sys.stderr)
