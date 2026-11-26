@@ -713,6 +713,17 @@ def build_model(v, use_slim=True):
             warnings.append(f"no_points:{a['handle']}")
         rows.append(r)
     cl = [x.strip() for x in (slim or {}).get("common_levels", []) if x.strip()][:MAX_COMMON] if slim else auto_common(v, ref)
+    # Fair common levels (Daniel 2026-11-26): recomputed from every analyst's price_levels, one vote each, >=3 analysts.
+    # Overrides the routine-written list; falls back to it only when no account carries price_levels yet.
+    try:
+        sys.path.insert(0, os.path.join(HERE, "kol"))
+        import consensus_levels as _cons
+        if _cons.has_levels(v):
+            cl = _cons.common_lines(v)[:MAX_COMMON]
+        else:
+            warnings.append("consensus_no_price_levels")
+    except Exception as e:
+        warnings.append(f"consensus_error:{e}")
     dv = (slim or {}).get("divergence", "").strip() if slim else auto_divergence(v)
     cnt = {k: sum(1 for r in rows if r["stance"] == k) for k in ("偏多", "中性", "偏空")}
     order = {"偏空": 0, "中性": 1}
